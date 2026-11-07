@@ -1,0 +1,10 @@
+[project]
+name = "aa-visual-imagery"
+version = "0.0.1"
+description = "Stability-aware multiobjective channel/band/window selection for EEG visual-imagery decoding"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+markers = ["slow: long-running tests"]

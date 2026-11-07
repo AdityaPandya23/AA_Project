@@ -1,0 +1,109 @@
+# Single source of truth for all fixed design values.
+# Changing anything outside `paths:` changes config_hash and therefore
+# invalidates comparisons with earlier results (see docs/CONTRACTS.md §i).
+
+paths:
+  # Relative paths are resolved against the repository root.
+  # Environment variables override them (see src/config.py).
+  data_dir: data            # env: AA_DATA_DIR   (BIDS root of the Gao dataset)
+  cache_dir: cache          # env: AA_CACHE_DIR
+  results_dir: results      # env: AA_RESULTS_DIR (optional convenience)
+
+dataset:
+  name: Gao et al. Visual Imagery
+  doi: 10.6084/m9.figshare.30227503
+  n_subjects: 22
+  sessions: ["01", "02"]     # some subjects have only ses-01
+  task: figure
+  raw_sfreq: 1000
+  raw_n_channels: 32
+  raw_format: bdf
+  trials_per_session: 120
+  trials_per_class: 40
+  n_blocks: 4
+  # Trial timeline in seconds relative to trial onset.
+  trial_phases_s:
+    fixation: [0.0, 3.0]
+    viewing:  [3.0, 7.0]
+    mask:     [7.0, 9.0]
+    imagery:  [9.0, 13.0]
+    rest:     [13.0, 17.0]
+
+classes:
+  circle: 0
+  square: 1
+  pentagram: 2
+
+preprocess:
+  sfreq: 250                 # resample target (Hz)
+  epoch_len_s: 4.0
+  epoch_samples: 1000        # epoch_len_s * sfreq
+  broadband_hz: [1.0, 40.0]  # EEGNet cache
+  # Filter design. DEFAULT, to be confirmed by R02 (see docs/CONTRACTS.md "Open items").
+  filter:
+    method: butter_sosfiltfilt   # zero-phase IIR
+    order: 4
+    pad_s: 1.0                   # filter on epoch +/- pad_s, then crop (edge-artifact guard)
+  units: uV
+
+channels:
+  # PLACEHOLDER until R02 checks channels.tsv. Order defines chromosome bits 0-7.
+  candidates: [O1, Oz, O2, Pz, P3, P4, P7, P8]
+
+bands:
+  # Order defines chromosome bits 8-11.
+  names: [theta, alpha, beta, lowgamma]
+  edges_hz:
+    theta: [4.0, 7.0]
+    alpha: [8.0, 12.0]
+    beta: [13.0, 30.0]
+    lowgamma: [30.0, 40.0]
+
+windows:
+  # Relative to imagery (or viewing) onset. Order defines chromosome bits 12-18.
+  length_s: 1.0
+  length_samples: 250
+  starts_s: [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0]
+
+chromosome:
+  n_bits: 19                 # 8 channel + 4 band + 7 window genes
+  min_channels: 2
+  min_bands: 1
+  min_windows: 1
+  # cost = (n_ch/8 + n_bands/4 + n_win/7) / 3
+
+fbcsp:
+  scheme: one_vs_rest
+  n_filter_pairs: 1          # per class per band-window -> 6 features per band-window
+  lda:
+    solver: lsqr
+    shrinkage: auto
+
+ga:
+  pop_size: 30
+  n_generations: 20
+  inner_folds: 3
+  seeds: [0, 1, 2]
+  # NSGA-II objectives (all minimised): [-ba_mean, ba_std, cost]
+  # Single-objective baseline: maximise ba_mean only.
+  choose_rule: lowest_cost_within_1sd_of_best
+
+eegnet:
+  # Defaults for braindecode EEGNetv4; owner of src/eegnet.py may tune and record here.
+  n_channels: 32
+  F1: 8
+  D: 2
+  drop_prob: 0.5
+  max_epochs: 300
+  batch_size: 32
+  lr: 0.001
+  weight_decay: 0.0
+  early_stopping_patience: 50
+  val_fraction: 0.2          # carved from the training fold only (stratified)
+
+evaluation:
+  metric: balanced_accuracy
+  chance_level: 0.3333333333
+  protocols: [block, cross_session, random]
+  random_n_splits: 5
+  methods: [fbcsp_all, ga_single, ga_nsga, eegnet, eegnet_gach]

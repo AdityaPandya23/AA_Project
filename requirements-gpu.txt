@@ -1,0 +1,5 @@
+# EEGNet comparison. Install torch for your CUDA version first if needed:
+#   https://pytorch.org/get-started/locally/
+-r requirements.txt
+torch>=2.1
+braindecode>=0.8
