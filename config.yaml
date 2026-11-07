@@ -5,7 +5,7 @@
 paths:
   # Relative paths are resolved against the repository root.
   # Environment variables override them (see src/config.py).
-  data_dir: data            # env: AA_DATA_DIR   (BIDS root of the Gao dataset)
+  data_dir: data/raw        # env: AA_DATA_DIR   (BIDS root of the Gao dataset)
   cache_dir: cache          # env: AA_CACHE_DIR
   results_dir: results      # env: AA_RESULTS_DIR (optional convenience)
 
@@ -47,7 +47,10 @@ preprocess:
   units: uV
 
 channels:
-  # PLACEHOLDER until R02 checks channels.tsv. Order defines chromosome bits 0-7.
+  # CONFIRMED by R02 against channels.tsv / electrodes.tsv (Neuracle NeuSenW32, 32 EEG,
+  # no EOG). The cap has no POz, PO7 or PO8: POz -> Pz (nearest unused, 38 mm; PO3/PO4
+  # are 39 mm but would break the midline/symmetry), PO7 -> P7, PO8 -> P8 (30 mm).
+  # See docs/DATA_NOTES.md. Order defines chromosome bits 0-7.
   candidates: [O1, Oz, O2, Pz, P3, P4, P7, P8]
 
 bands:
