@@ -107,7 +107,9 @@ def _recording_job(subject: str, session: str, cfg: dict, cache_dir: Path, out_d
 
 def _mean(rows, key):
     v = [r[key] for r in rows if r.get(key) is not None]
-    return (float(np.mean(v)), float(np.std(v)), len(v)) if v else (None, None, 0)
+    # Sample SD across recordings (ddof=1), the same convention as reports/make_tables.py.
+    return (float(np.mean(v)), float(np.std(v, ddof=1)) if len(v) > 1 else None, len(v)) \
+        if v else (None, None, 0)
 
 
 def summarise(rows: list[dict], cfg: dict) -> dict[str, Any]:

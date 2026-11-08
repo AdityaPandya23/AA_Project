@@ -71,6 +71,26 @@ def method_color(method: str) -> str:
     return CATEGORICAL[6 + (sum(map(ord, base)) % 2)]  # stable slot for unknown methods
 
 
+def _mix(hex_a: str, hex_b: str, t: float) -> str:
+    """Blend two hex colours: ``t = 0`` gives ``hex_a``, ``t = 1`` gives ``hex_b``."""
+    a = np.array([int(hex_a[i:i + 2], 16) for i in (1, 3, 5)], float)
+    b = np.array([int(hex_b[i:i + 2], 16) for i in (1, 3, 5)], float)
+    return "#" + "".join(f"{int(round(v)):02x}" for v in (1 - t) * a + t * b)
+
+
+def method_fill(method: str) -> dict[str, Any]:
+    """Fill style for area marks (bars, boxes).
+
+    A ``_view`` variant keeps its base method's hue (same entity) but is drawn as
+    a lighter tint with hatching in the base colour, so the two series in one chart
+    differ by more than colour alone.
+    """
+    base = method_color(method)
+    if method.endswith("_view"):
+        return {"facecolor": _mix(base, SURFACE, 0.55), "hatch": "////", "hatchcolor": base}
+    return {"facecolor": base, "hatch": None, "hatchcolor": base}
+
+
 def method_label(method: str) -> str:
     base = method[:-5] if method.endswith("_view") else method
     lab = METHOD_LABELS.get(base, base)
@@ -567,11 +587,13 @@ def plot_subject_bars(df: pd.DataFrame, protocol: str = "block", methods: Sequen
     width = 0.8 / max(n, 1)
     x = np.arange(len(wide))
     for i, m in enumerate(methods):
+        fill = method_fill(m)
         ax.bar(x - 0.4 + width * (i + 0.5), wide[m].to_numpy(), width=width * 0.9,
-               color=method_color(m), label=method_label(m), zorder=2, edgecolor=SURFACE,
-               linewidth=0.5)
+               color=fill["facecolor"], hatch=fill["hatch"], hatchcolor=fill["hatchcolor"],
+               label=method_label(m), zorder=2, edgecolor=SURFACE, linewidth=0.5)
     _chance_line(ax)
     ax.set_xticks(x, [f"S{s}" for s in wide.index])
+    ax.set_xlim(-0.6, len(wide) - 0.4)
     ax.set_ylim(0, 1)
     ax.set_ylabel("Balanced accuracy")
     ax.set_xlabel("Subject")
@@ -600,6 +622,8 @@ def plot_method_comparison(df: pd.DataFrame, protocol: str = "block", ax=None):
         patch.set_facecolor(method_color(m))
         patch.set_alpha(0.35)
         patch.set_edgecolor(method_color(m))
+        if method_fill(m)["hatch"]:
+            patch.set_hatch(method_fill(m)["hatch"])
     rng = np.random.default_rng(0)
     for i, m in enumerate(methods):
         v = wide[m].dropna().to_numpy()
@@ -687,10 +711,11 @@ def plot_cost_vs_accuracy(df: pd.DataFrame, protocol: str = "block", ax=None):
     Small markers are subjects (seeds and sessions averaged); large markers are
     method means. Grey points are the GA's inner-CV Pareto sets (pooled), with
     their non-dominated front. Methods without a chromosome cost (EEGNet) are
-    drawn in a separate "n/a" column at the right.
+    drawn in a separate "n/a" column at the right. ``_view`` sanity variants are
+    left out: they decode a different task period, not a cheaper selection.
     """
     agg = aggregate_seeds(df)
-    agg = agg[agg["protocol"] == protocol]
+    agg = agg[(agg["protocol"] == protocol) & ~agg["method"].str.endswith("_view")]
     subj = agg.groupby(["method", "subject"])[["mean_cost", "ba_mean"]].mean().reset_index()
     methods = _sort_methods(subj["method"])
     ax = _new_ax(ax, (8.4, 4.2))

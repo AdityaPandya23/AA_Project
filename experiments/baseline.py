@@ -71,7 +71,8 @@ def summarise(recs: list[dict]) -> str:
     for prot in ("block", "cross_session"):
         bas = [r["ba_mean"] for r in recs if r["protocol"] == prot]
         if bas:
-            lines.append(f"{prot}: mean BA {np.mean(bas):.3f} +/- {np.std(bas):.3f} over {len(bas)} "
+            sd = np.std(bas, ddof=1) if len(bas) > 1 else float("nan")  # sample SD, as make_tables
+            lines.append(f"{prot}: mean BA {np.mean(bas):.3f} +/- {sd:.3f} over {len(bas)} "
                          f"recordings (chance 0.333)")
     if any(r.get("synthetic") for r in recs):
         lines.append("NOTE: synthetic cache (fake subjects), not real data.")
