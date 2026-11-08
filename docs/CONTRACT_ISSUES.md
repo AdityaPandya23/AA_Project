@@ -187,3 +187,119 @@ stability claim. Choose the rule before the results are written up, and record i
 * `eegnet_32ch` is treated as an alias of `eegnet` (same colour and order).
   `eegnet_8ch` gets its own colour and label. *Proposal:* the contract owner
   picks one naming. The analysis needs no change either way.
+
+---
+
+# R07 (GA / EEGNet)
+
+Found while implementing `src/ga.py`, `src/eegnet.py`, `experiments/run_ga.py`
+and `experiments/run_eegnet.py` (branch `ga`). **No contract was changed.**
+R01's items above (1–12 and the summary table) are unchanged. R07 follows them: items 3 (same-`X` rule, no
+in-place edits, BLAS pinned to 1 thread → joblib across folds, subjects and seeds), 6
+(per-fold `y_true`, `y_pred`, `n_test`, `test_trial_id`, `n_train`,
+`test_blocks`) and 7 (`pareto` inside each `per_fold[k]`).
+
+**R07 answers to the summary table:** #2: keep the warn + `StratifiedKFold`
+fallback (the block and cross-session protocols never trigger it; the GA's own
+nesting assertion still guarantees indices stay in `train_idx`). #6: done for
+`ga_nsga`, `ga_single`, `eegnet_32ch` and `eegnet_8ch`. #7: R07 writes both
+(`per_fold[k]["pareto"]` and the side file). Either can become the contract
+location. #11: R07 will run the offline threshold comparison from the saved
+fronts after the real runs.
+
+## R07-1. EEGNet method names do not match §i — *decision needed* (= R01 #12)
+
+The task specified `results/eegnet_32ch/` and `results/eegnet_8ch/`. §i only
+defines `eegnet` (all 32 channels) and `eegnet_gach` (GA-chosen channels). EEGNet
+on the fixed 8 FBCSP candidate channels is not a contract method, and neither
+name is in `config.evaluation.methods`.
+
+*Now:* `run_eegnet.py` writes `eegnet_32ch` / `eegnet_8ch` by default.
+`--method-name eegnet --channels 32` writes the contract name instead.
+*Proposal:* add `eegnet_8ch` to §i and `config.evaluation.methods`, and either
+rename `eegnet_32ch` to `eegnet` or list both.
+*Resolved on the analysis side by PR #6:* `eegnet_32ch` is an alias of `eegnet`, and
+`eegnet_8ch` has its own label and marker. Only the contract naming is left.
+
+## R07-2. `evaluate_eegnet` has no seed argument (§h)
+
+The signature `evaluate_eegnet(X, y, splits, ch_idx=None, cfg=None)` is fixed
+by `tests/test_contracts.py`, but EEGNet is run with seeds 0, 1 and 2.
+
+*Now:* the seed is read from `cfg["eegnet"].get("seed", 0)`, and the device from
+`cfg["eegnet"].get("device")`. `run_eegnet.py` sets the seed on a per-run copy.
+`config_hash` is computed on the design config without these keys, so all seeds
+share one hash. *Proposal:* list both as optional keys in §h.
+
+## R07-3. `choose_from_pareto`: tie for `b*` is unspecified (§g)
+
+If several entries share the highest `ba_mean` but have different `ba_std`,
+the threshold `b*.ba_mean - b*.ba_std` depends on which one is `b*`.
+*Now:* `b*` is chosen by highest `ba_mean`, then lower `ba_std`, then lower `cost`,
+then smallest `to_str`. This matches the order of the final tie-break.
+*Proposal:* write this into §g.
+
+## R07-4. GA operators are not in the contract or `config.yaml`
+
+They affect the results but not `config_hash`.
+*Now:* `BinaryRandomSampling` (each bit Bernoulli(0.5), then repair, which is
+the same as `random_valid(p=0.5)`), `TwoPointCrossover`, `BitflipMutation` with
+per-gene probability 1/19, `eliminate_duplicates=True`, and offspring =
+`pop_size`. That is about 600 evaluations per run, about 570 of them unique.
+*Proposal:* add `ga.crossover`, `ga.mutation_prob_var` and `ga.sampling_p` to
+`config.yaml`.
+
+## R07-5. `infer_time_ms` definition (§i)
+
+*Now:* aligned with R01's FBCSP experiments, i.e. the batch prediction of the
+test fold divided by `n_test`. The GA uses `experiments.common.infer_latency_ms`
+directly. EEGNet also includes the host→device copy and `cuda.synchronize`.
+EEGNet also writes `infer_time_ms_batch1` (batch size 1, which is what an online BCI sees).
+*Proposal:* state "batch prediction / n_test" in §i.
+
+## R07-6. `train_time_s` for the GA under parallel folds (§i)
+
+Folds run as separate processes, so `train_time_s` is the **sum** of the
+per-fold wall times (GA plus final fit), not the elapsed time of the run. The extra
+key `ga_time_s` (top level and per fold) holds the GA search alone.
+
+## R07-7. Pareto side files and crash-resume checkpoints (= R01 #7, #12; resolved)
+
+The fronts are stored in `per_fold[k]["pareto"]` (R01 item 7) **and** in a side
+file `{results_dir}/pareto/{method}/sub-XX_ses-YY_seed-Z.json`.
+Checkpoints are in `{results_dir}/raw/partial/{method}/..._fold-k.json`
+(git-ignored). `analysis.load_results` reads only `{dir}/{method}/*.json`, so it
+never reads either as a result, and since PR #6 it attaches side-file fronts when the
+main JSON has none. *Proposal:* §j should reserve `pareto/` and `raw/` as
+non-method directories.
+
+## R07-8. EEGNet training details not in config (open item 9)
+
+They are recorded in the `src/eegnet.py` docstring:
+* early stopping on the lowest validation cross-entropy (stratified
+  `val_fraction` taken from the training fold only), with the best weights restored;
+* per-channel z-scoring with statistics from the fit part of the training fold;
+* `final_layer_with_constraint=True` (pinned, because braindecode 2.0 warns its default will change);
+* braindecode 2.0 renamed `EEGNetv4` to `EEGNet`, and the code imports either.
+
+*Proposal:* move these to `config.eegnet` so they change `config_hash`.
+
+## R07-9. GA runtime with R01's `fbcsp.evaluate`
+
+Measured on R07 (i5-13450HX) with the synthetic cache (the same shapes as real data):
+about 0.004 s per 3-fold `evaluate`, so about 2.2 s per GA fold at the config budget
+(pop 30, 20 generations). The full GA grid (22 subjects × 2 sessions × 2 methods ×
+3 seeds, plus cross-session) is about 1,200 fold jobs, which is minutes on one
+machine. **No smaller budget is needed.** There is even room to raise `pop_size` or
+`n_generations` if the Pareto fronts look unconverged on real data.
+
+## R07-10. Subject labels on the CLI
+
+The CLIs accept `17`, `sub-17`, `17..22`, `sub-17..sub-22` and `17-22`, and
+always write the contract's 2-digit label.
+
+## Requests for R01
+
+None left. PR #6 covered the method names and the side files. `cv.py` and
+`fbcsp.py` work as they are. `tests/test_ga.py::test_real_fbcsp_cache_is_hit`
+checks that one GA run computes the covariances once.
