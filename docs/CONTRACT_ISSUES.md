@@ -5,7 +5,12 @@ Found while implementing `src/cv.py`, `src/fbcsp.py` and `src/analysis.py`
 does now and what I propose. Items marked *decision needed* need agreement before
 anyone edits `CONTRACTS.md`.
 
-### Open decisions (summary, 2026-11-08)
+> **Status:** every item below was settled at P1.5 and is recorded in
+> `docs/CONTRACTS.md` §k (binding from tag `p1-integrated`). The only item
+> still open is #11 / k12 (the 1-SD rule), which is revisited after P3. The
+> text below is kept as the rationale.
+
+### Open decisions (summary, 2026-11-08; resolved, see CONTRACTS §k)
 
 | # | Question | Default in code now | Who decides |
 |---|---|---|---|

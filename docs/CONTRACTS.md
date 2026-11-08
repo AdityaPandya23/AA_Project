@@ -9,8 +9,8 @@ Contents: [Conventions](#0-conventions) · [a. FBCSP cache](#a-fbcsp-cache) ·
 [b. EEGNet cache](#b-eegnet-cache) · [c. Viewing cache](#c-viewing-cache) ·
 [d. chromosome](#d-srcchromosomepy) · [e. cv](#e-srccvpy) · [f. fbcsp](#f-srcfbcsppy) ·
 [g. ga](#g-srcgapy) · [h. eegnet](#h-srceegnetpy) · [i. Results JSON](#i-results-json) ·
-[j. analysis](#j-srcanalysispy) · [Supporting modules](#supporting-modules) ·
-[Open items](#open-items)
+[j. analysis](#j-srcanalysispy) · [Supporting modules](#supporting-modules) · [k. Decisions after P1](#k-decisions-after-p1-binding-from-tag-p1-integrated) ·
+[Open items](#open-items-status-at-p1-integrated)
 
 ---
 
@@ -317,31 +317,42 @@ never across seeds as if they were independent samples.
 
 ---
 
-## Open items
+## k. Decisions after P1 (binding from tag `p1-integrated`)
 
-Decisions I did not make. Each needs an owner to settle it and then edit this file.
+Settled by R02 (contract owner) at P1.5, 2026-11-08, from the items in
+`docs/CONTRACT_ISSUES.md`. Where this section and §a–§j differ, this section
+wins. **`config.yaml` is unchanged, so `config_hash` stays `08e124167b`** and the
+P2 results stay valid.
 
-1. **Candidate channels.** The list is a placeholder. R02 checks `channels.tsv`.
-   PO3/PO4 exist on a BioSemi-32 cap and may be better than P7/P8. The count of
-   8 is fixed by the chromosome layout.
-2. **All 32 channels EEG?** If `channels.tsv` shows EOG or other non-EEG
-   channels, the EEGNet `32` changes. R02 confirms.
-3. **Block and trial-onset derivation** from `events.tsv` (event codes, block
-   boundaries). R02.
-4. **Reference and artifact handling.** Re-reference (average or none?),
-   trial rejection criterion. The contract already allows rejected trials via `trial_id`.
-5. **Filter design.** Default Butterworth order 4, zero-phase, 1 s padding. The
-   lowgamma band (30–40 Hz) sits right below the 1–40 Hz broadband edge and is
-   EMG-prone.
-6. **CSP details.** Covariance regularisation (`cov_reg`) and raw versus
-   normalised log-variance. These are internal to `fbcsp.py`, but record the choice.
-7. **"Stability" in the stability-aware GA** is assumed to be `ba_std` across
-   inner folds. If selection stability across seeds or folds is also wanted,
-   that is a 4th objective and a contract change.
-8. **"Within 1 SD"** in `choose_from_pareto` uses the SD of the best-`ba_mean`
-   solution. The alternative would be the SD over the Pareto set.
-9. **EEGNet hyperparameters and training budget**, and whether `eegnet_gach` is run at all.
-10. **Cross-session GA.** It uses `inner_splits` over the 4 ses-01 blocks with
-    `n=3`, so one inner fold holds 2 blocks.
-11. **Subjects with only ses-01.** They are skipped for cross-session. List them in the README once known.
-12. **Machine ownership** of each module. Not assigned here.
+| # | Topic | Decision |
+|---|---|---|
+| k1 | EEGNet method names (§i; CONTRACT_ISSUES R01 #12 / R07-1) | Keep what `run_eegnet.py` writes. **`eegnet_32ch`** = the contract's `eegnet` (all 32 channels); `analysis` treats the two as one method. **`eegnet_8ch`** = new method: EEGNet on the 8 fixed candidate channels. `eegnet_gach` (GA-chosen channels) stays allowed but is **not planned** for P4. The method list in §i is authoritative; `config.evaluation.methods` is informational and is not edited (that would change `config_hash`). |
+| k2 | GA operators and EEGNet training details (R07-4, R07-8) | **Stay in code, frozen at `p1-integrated`.** They are not moved into `config.yaml`. The values are those in CONTRACT_ISSUES R07-4 and R07-8: binary random sampling p = 0.5 + repair, two-point crossover, bit-flip mutation 1/19 per gene, duplicate elimination, offspring = pop; EEGNet early stopping on validation cross-entropy with best weights restored, per-channel z-scoring from the fit part, `final_layer_with_constraint=True`. Every result JSON records `git_commit`, which pins them. Changing any of them after the tag requires a new tag and re-running the affected methods. |
+| k3 | `inner_splits` with fewer than `n` blocks (§e; R01 #2) | Accepted as implemented: `RuntimeWarning` + `StratifiedKFold(n, shuffle=True, random_state=seed)` on `train_idx`. It never triggers in the planned protocols (3 training blocks; 4 ses-01 blocks for cross-session). |
+| k4 | Unit of paired tests (§j; R01 #5) | n = subjects: seeds averaged, then sessions averaged within subject. Single-session analyses via `analysis.subject_level(..., sessions=[...])`. |
+| k5 | Per-fold prediction keys (§i; R01 #6) | `y_true`, `y_pred`, `n_test`, `test_trial_id`, `n_train` and `test_blocks` are **expected** in every `per_fold[k]` for all methods (all runners already write them). `above_chance` uses the label-permutation test on them. |
+| k6 | Where `pareto` lives (§i; R01 #7, R07-7) | Both: `per_fold[k]["pareto"]` in the result JSON and the side file `{results_dir}/pareto/{method}/…`. `{results_dir}/raw/partial/` holds crash-resume checkpoints (git-ignored). |
+| k7 | `seed` under `protocol=random` (§i; R01 #8) | The seed is the `random_splits` split seed (`seed-0` … `seed-4`). |
+| k8 | Tie for `b*` in `choose_from_pareto` (§g; R07-3) | `b*` = highest `ba_mean`, then lower `ba_std`, then lower `cost`, then smallest `to_str(bits)`. |
+| k9 | EEGNet seed and device (§h; R07-2) | Optional `cfg["eegnet"]["seed"]` and `cfg["eegnet"]["device"]`, set per run on a copy of the config by `run_eegnet.py`. Not in `config.yaml`; excluded from `config_hash`. |
+| k10 | `infer_time_ms` (§i; R07-5) | Batch prediction of the test fold ÷ `n_test`. EEGNet also writes `infer_time_ms_batch1` (online-BCI latency). |
+| k11 | `train_time_s` for the GA (§i; R07-6) | Sum of the per-fold wall times (GA search + final fit). `ga_time_s` holds the search alone. |
+| k12 | "Within 1 SD" rule (§g; open item 8, R01 #11) | **Unchanged for P3.** Re-examine after P3 using the stored Pareto fronts; any change is a new contract decision and a re-run of `ga_nsga`. |
+| k13 | Results location of the baseline | `experiments/baseline.py` writes `results/baseline_all/fbcsp_all/`, and `experiments/sanity.py` writes `results/sanity/`. GA and EEGNet runners write `results/{method}/`. `analysis.load_results` takes a list of directories. |
+
+---
+
+## Open items (status at `p1-integrated`)
+
+1. **Candidate channels:** ✅ `[O1, Oz, O2, Pz, P3, P4, P7, P8]` confirmed (DATA_NOTES §2).
+2. **All 32 channels EEG?** ✅ Yes, there is no EOG; EEGNet stays at 32 (DATA_NOTES §2).
+3. **Block and trial-onset derivation:** ✅ the single marker is the imagery onset; blocks come from the pauses between markers (DATA_NOTES §3).
+4. **Reference and artifact handling:** ✅ CAR, plus peak-to-peak > 150 µV on the candidates (DATA_NOTES §6, `config.preprocess.reject`).
+5. **Filter design:** ✅ as in `config.preprocess` (FIR 1–40 Hz on continuous data; Butterworth order 4 per band on padded epochs).
+6. **CSP details:** ✅ recorded in CONTRACT_ISSUES §4.
+7. **"Stability" = `ba_std` across inner folds:** ✅ unchanged. Selection stability (Jaccard/Kuncheva) is reported in P5 but is not an objective.
+8. **"Within 1 SD":** ⏳ see k12 (after P3).
+9. **EEGNet hyperparameters and budget:** ✅ `config.eegnet` + k2; `eegnet_gach` not planned (k1).
+10. **Cross-session GA:** ✅ `StratifiedGroupKFold` over the 4 ses-01 blocks with n = 3.
+11. **Subjects with only ses-01:** ✅ sub-09 and sub-10 (20 cross-session subjects).
+12. **Machine ownership:** ✅ R02 data/integration, R01 cv/fbcsp/analysis, R07 ga/eegnet. P3 subject split: R02 sub-01..08, R01 sub-09..16, R07 sub-17..22; R07 runs all EEGNet.
