@@ -37,3 +37,29 @@ def test_empty_local_fails(tmp_path):
     ref = pd.read_csv(REF, dtype=str, keep_default_na=False)
     assert cm.main(["--local", str(_write(ref.head(0), tmp_path / "m.csv")),
                     "--reference", str(REF)]) == 1
+
+
+def test_subjects_reports_missing_recordings(tmp_path, capsys):
+    ref = pd.read_csv(REF, dtype=str, keep_default_na=False)
+    # sub-11 ses-02 never built; sub-12 not built at all; sub-01 present but not requested
+    local = ref[ref["subject"].isin(["01", "11"])]
+    local = local[~((local["subject"] == "11") & (local["session"] == "02"))]
+    path = _write(local, tmp_path / "m.csv")
+    assert cm.main(["--local", str(path), "--reference", str(REF)]) == 0  # old behaviour
+    assert cm.main(["--local", str(path), "--reference", str(REF),
+                    "--subjects", "11", "12"]) == 1
+    out = capsys.readouterr().out
+    assert "sub-11 ses-02: missing locally" in out
+    assert "sub-12 ses-01: missing locally" in out and "sub-12 ses-02: missing locally" in out
+    assert "sub-01" not in out.split("problem(s)")[1]
+
+
+def test_subjects_ok_and_all(tmp_path):
+    ref = pd.read_csv(REF, dtype=str, keep_default_na=False)
+    subset = _write(ref[ref["subject"].isin(["09", "10"])], tmp_path / "m.csv")
+    # 09 and 10 have ses-01 only, so nothing is missing
+    assert cm.main(["--local", str(subset), "--reference", str(REF),
+                    "--subjects", "9", "10"]) == 0
+    assert cm.main(["--local", str(REF), "--reference", str(REF), "--subjects", "all"]) == 0
+    assert cm.main(["--local", str(subset), "--reference", str(REF), "--subjects", "all"]) == 1
+    assert cm.main(["--local", str(subset), "--reference", str(REF), "--subjects", "99"]) == 1
