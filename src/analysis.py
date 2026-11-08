@@ -7,7 +7,10 @@ test, so that n = subjects (see docs/CONTRACT_ISSUES.md).
 
 Extra per-fold keys used when present (optional per CONTRACTS.md §0/§i):
 ``y_true`` / ``y_pred`` (permutation test, confusion matrix), ``n_test``
-(binomial fallback) and ``pareto`` (cost-vs-accuracy plot).
+(binomial fallback) and ``pareto`` (cost-vs-accuracy plot). ``pareto`` may
+also come from the side file ``{dir}/pareto/{method}/<same name>.json`` written by
+``experiments/run_ga.py`` (``{"folds": [{"fold", "chosen_bits", "pareto"}]}``).
+Results tagged ``fbcsp_impl="standin"`` trigger a warning.
 
 Command line::
 
@@ -43,19 +46,29 @@ CATEGORICAL = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300",
                "#e34948"]
 SEQ_BLUE = ["#fcfcfb", "#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95",
             "#0d366b"]
-METHOD_ORDER = ["ga_nsga", "fbcsp_all", "ga_single", "eegnet", "eegnet_gach"]
+METHOD_ORDER = ["ga_nsga", "fbcsp_all", "ga_single", "eegnet", "eegnet_gach", "eegnet_8ch"]
+#: Names used by experiments/run_eegnet.py before the contract settles them
+#: (CONTRACT_ISSUES "ga" §1). ``eegnet_32ch`` is the contract's ``eegnet`` and
+#: shares its colour; ``eegnet_8ch`` gets the next categorical slot.
+METHOD_ALIASES = {"eegnet_32ch": "eegnet"}
 METHOD_LABELS = {"ga_nsga": "GA-NSGA (proposed)", "fbcsp_all": "FBCSP all", "ga_single":
-                 "GA single-obj.", "eegnet": "EEGNet", "eegnet_gach": "EEGNet GA-ch"}
+                 "GA single-obj.", "eegnet": "EEGNet", "eegnet_gach": "EEGNet GA-ch",
+                 "eegnet_32ch": "EEGNet (32 ch)", "eegnet_8ch": "EEGNet (8 ch)"}
 METHOD_MARKERS = {"ga_nsga": "o", "fbcsp_all": "s", "ga_single": "^", "eegnet": "D",
-                  "eegnet_gach": "v"}
+                  "eegnet_gach": "v", "eegnet_32ch": "D", "eegnet_8ch": "P"}
+
+
+def _base(method: str) -> str:
+    base = method[:-5] if method.endswith("_view") else method
+    return METHOD_ALIASES.get(base, base)
 
 
 def method_color(method: str) -> str:
     """Fixed colour per method (``_view`` variants share their base colour)."""
-    base = method[:-5] if method.endswith("_view") else method
+    base = _base(method)
     if base in METHOD_ORDER:
         return CATEGORICAL[METHOD_ORDER.index(base)]
-    return CATEGORICAL[5 + (sum(map(ord, base)) % 3)]  # stable slot for unknown methods
+    return CATEGORICAL[6 + (sum(map(ord, base)) % 2)]  # stable slot for unknown methods
 
 
 def method_label(method: str) -> str:
@@ -66,9 +79,26 @@ def method_label(method: str) -> str:
 
 def _sort_methods(methods: Iterable[str]) -> list[str]:
     def key(m):
-        base = m[:-5] if m.endswith("_view") else m
+        base = _base(m)
         return (METHOD_ORDER.index(base) if base in METHOD_ORDER else 99, m)
     return sorted(set(methods), key=key)
+
+
+def _pareto_side_file(path: Path) -> Path:
+    """``{dir}/{method}/X.json`` -> ``{dir}/pareto/{method}/X.json`` (experiments/run_ga.py)."""
+    return path.parent.parent / "pareto" / path.parent.name / path.name
+
+
+def _attach_side_pareto(path: Path, folds: list[dict[str, Any]]) -> None:
+    """Attach Pareto fronts from the run_ga side file, matched by fold number."""
+    side = _pareto_side_file(path)
+    if not side.exists():
+        return
+    with open(side, encoding="utf-8") as f:
+        by_fold = {int(e["fold"]): e.get("pareto") for e in json.load(f).get("folds", [])}
+    for f in folds:
+        if f.get("pareto") is None and by_fold.get(int(f["fold"])):
+            f["pareto"] = by_fold[int(f["fold"])]
 
 
 # ---------------------------------------------------------------- loading
@@ -101,6 +131,9 @@ def load_results(results_dir: str | os.PathLike) -> pd.DataFrame:
                 # top-level per-fold list of Pareto sets -> attach to folds
                 for f, par in zip(folds, rec["pareto"]):
                     f["pareto"] = par
+            if all("pareto" not in f for f in folds):
+                _attach_side_pareto(p, folds)
+            impl = rec.get("fbcsp_impl")
             rows.append({
                 "method": rec["method"], "subject": rec["subject"], "session": rec["session"],
                 "seed": rec["seed"], "protocol": rec["protocol"],
@@ -112,11 +145,16 @@ def load_results(results_dir: str | os.PathLike) -> pd.DataFrame:
                 "mean_n_features": float(np.mean(nfeat)) if nfeat else np.nan,
                 "per_fold": folds, "path": str(p), "n_folds": len(folds),
                 "synthetic": bool(rec.get("synthetic", False)),
+                "standin": impl == "standin" or (isinstance(impl, list) and "standin" in impl),
             })
     cols = ["method", "subject", "session", "seed", "protocol", "ba_mean", "ba_std",
             "train_time_s", "infer_time_ms", "config_hash", "mean_cost", "mean_n_features",
-            "per_fold", "path", "n_folds", "synthetic"]
+            "per_fold", "path", "n_folds", "synthetic", "standin"]
     df = pd.DataFrame(rows, columns=cols)
+    if df["standin"].any():
+        warnings.warn(f"{int(df['standin'].sum())} result file(s) were made with the "
+                      "development stand-in FBCSP (fbcsp_impl='standin'); delete them "
+                      "before reporting", RuntimeWarning, stacklevel=2)
     if df["config_hash"].nunique() > 1:
         warnings.warn(f"results mix {df['config_hash'].nunique()} config hashes: "
                       f"{sorted(df['config_hash'].unique())}", RuntimeWarning, stacklevel=2)
