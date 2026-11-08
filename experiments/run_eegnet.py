@@ -23,15 +23,17 @@ import time
 from pathlib import Path
 from typing import Any
 
-from experiments import _common as C
 from src import cache, results
 from src.config import config_hash, load_config
+
+from . import _common as C
+from .common import git_commit, resolve_cache_dir
 
 METHOD_NAMES = {"32": "eegnet_32ch", "8": "eegnet_8ch"}
 
 
 def run_one(method: str, n_ch: str, subject: str, session: str, seed: int, protocol: str,
-            cfg: dict[str, Any], cache_dir: Path | None, results_dir: Path) -> Path:
+            cfg: dict[str, Any], cache_dir: Path, results_dir: Path) -> Path:
     from src.eegnet import evaluate_eegnet
 
     d, splits = C.load_unit("eegnet", subject, session, cfg, cache_dir)
@@ -40,8 +42,9 @@ def run_one(method: str, n_ch: str, subject: str, session: str, seed: int, proto
     run_cfg["eegnet"]["seed"] = int(seed)
     r = evaluate_eegnet(d["X"], d["y"], splits, ch_idx=ch_idx, cfg=run_cfg)
     folds = [results.make_fold_record(k, ba, None, n_features=r["n_params"],
-                                      best_epoch=r["best_epoch"][k], n_epochs=r["n_epochs"][k])
-             for k, ba in enumerate(r["per_fold"])]
+                                      best_epoch=r["best_epoch"][k], n_epochs=r["n_epochs"][k],
+                                      **C.prediction_keys(tr, te, r["y_pred"][k], d))
+             for k, (ba, (tr, te)) in enumerate(zip(r["per_fold"], splits))]
     rec = {
         "method": method, "subject": subject, "session": session, "seed": int(seed),
         "protocol": protocol, "per_fold": folds, "ba_mean": r["ba_mean"], "ba_std": r["ba_std"],
@@ -49,7 +52,8 @@ def run_one(method: str, n_ch: str, subject: str, session: str, seed: int, proto
         "config_hash": config_hash(cfg),   # hash of the design config, not the per-run seed
         "n_channels": int(d["X"].shape[1] if ch_idx is None else len(ch_idx)),
         "channels": [str(c) for c in (d["ch_names"] if ch_idx is None else d["ch_names"][ch_idx])],
-        "device": r["device"], "git_commit": C.git_commit(), "host": C.host_tag(),
+        "infer_time_ms_batch1": r["infer_time_ms_batch1"],
+        "device": r["device"], "git_commit": git_commit(), **C.provenance(d),
     }
     return results.write_result(rec, cfg, results_dir)
 
@@ -80,7 +84,7 @@ def main(argv: list[str] | None = None) -> int:
         cfg["eegnet"]["max_epochs"] = a.max_epochs
     if a.device:
         cfg["eegnet"]["device"] = a.device
-    cache_dir = Path(a.cache_dir) if a.cache_dir else Path(cfg["paths"]["cache_dir"])
+    cache_dir = resolve_cache_dir(a.cache_dir, cfg)
     results_dir = Path(a.results_dir) if a.results_dir else Path(cfg["paths"]["results_dir"])
     seeds = a.seeds if a.seeds is not None else list(cfg["ga"]["seeds"])
     sessions = a.sessions or list(cfg["dataset"]["sessions"])

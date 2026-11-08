@@ -112,6 +112,22 @@ def _predict(model, X, device, batch: int = 256) -> np.ndarray:
     return np.concatenate(out)
 
 
+def _batch_latency_ms(model, X, device) -> tuple[np.ndarray, float]:
+    """Predict the whole test fold in one batch; returns ``(y_pred, ms per trial)``.
+
+    Same definition as R01's FBCSP ``infer_latency_ms`` (batch predict / n_test),
+    so ``infer_time_ms`` is comparable across methods. Includes host->device copy.
+    """
+    import torch
+    sync = torch.cuda.synchronize if device.type == "cuda" else (lambda: None)
+    _predict(model, X[:1], device)  # warm-up
+    sync()
+    t0 = time.perf_counter()
+    yp = _predict(model, X, device)
+    sync()
+    return yp, (time.perf_counter() - t0) * 1000.0 / len(X)
+
+
 def _latency_ms(model, X, device, max_trials: int = 50) -> float:
     """Mean per-trial inference latency (batch size 1, includes host->device copy)."""
     import torch
@@ -169,6 +185,12 @@ def evaluate_eegnet(X: np.ndarray, y: np.ndarray, splits: Sequence[Split],
         ``{"per_fold": list[float], "ba_mean": float, "ba_std": float,
         "train_time_s": float}``. It may add ``"infer_time_ms"`` (mean
         per-trial latency) and ``"n_params"``.
+
+        Extra keys added here: ``y_pred`` (one int64 array per split, aligned
+        with its ``test_idx``, like ``fbcsp.evaluate``), ``infer_time_ms`` =
+        batch predict of the test fold / n_test (R01's definition),
+        ``infer_time_ms_batch1`` (batch size 1), ``best_epoch``, ``n_epochs``,
+        ``device`` and ``seed``.
     """
     os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
     import torch
@@ -187,6 +209,7 @@ def evaluate_eegnet(X: np.ndarray, y: np.ndarray, splits: Sequence[Split],
         X = X[:, np.asarray(ch_idx, dtype=np.int64), :]
 
     per_fold, train_time, latencies, best_epochs, n_epochs = [], 0.0, [], [], []
+    preds, latencies_b1 = [], []
     n_params = None
     for k, (tr, te) in enumerate(splits):
         tr = np.asarray(tr, dtype=np.int64)
@@ -209,8 +232,11 @@ def evaluate_eegnet(X: np.ndarray, y: np.ndarray, splits: Sequence[Split],
         train_time += time.perf_counter() - t0
 
         Xte = norm(X[te])
-        per_fold.append(float(balanced_accuracy_score(y[te], _predict(model, Xte, device))))
-        latencies.append(_latency_ms(model, Xte, device))
+        yp, lat = _batch_latency_ms(model, Xte, device)
+        per_fold.append(float(balanced_accuracy_score(y[te], yp)))
+        preds.append(yp.astype(np.int64))
+        latencies.append(lat)
+        latencies_b1.append(_latency_ms(model, Xte, device))
         best_epochs.append(int(best_ep))
         n_epochs.append(int(n_ep))
         n_params = int(sum(p.numel() for p in model.parameters() if p.requires_grad))
@@ -220,6 +246,8 @@ def evaluate_eegnet(X: np.ndarray, y: np.ndarray, splits: Sequence[Split],
 
     return {"per_fold": per_fold, "ba_mean": float(np.mean(per_fold)),
             "ba_std": float(np.std(per_fold)), "train_time_s": float(train_time),
-            "infer_time_ms": float(np.mean(latencies)), "n_params": n_params,
+            "infer_time_ms": float(np.mean(latencies)),
+            "infer_time_ms_batch1": float(np.mean(latencies_b1)), "y_pred": preds,
+            "n_params": n_params,
             "best_epoch": best_epochs, "n_epochs": n_epochs, "device": str(device),
             "seed": seed}

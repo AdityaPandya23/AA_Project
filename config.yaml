@@ -5,7 +5,7 @@
 paths:
   # Relative paths are resolved against the repository root.
   # Environment variables override them (see src/config.py).
-  data_dir: data            # env: AA_DATA_DIR   (BIDS root of the Gao dataset)
+  data_dir: data/raw        # env: AA_DATA_DIR   (BIDS root of the Gao dataset)
   cache_dir: cache          # env: AA_CACHE_DIR
   results_dir: results      # env: AA_RESULTS_DIR (optional convenience)
 
@@ -15,6 +15,7 @@ dataset:
   n_subjects: 22
   sessions: ["01", "02"]     # some subjects have only ses-01
   task: figure
+  bids_task: FVI             # BIDS task label of the figure task (AVI = animals, OVI = objects)
   raw_sfreq: 1000
   raw_n_channels: 32
   raw_format: bdf
@@ -38,8 +39,17 @@ preprocess:
   sfreq: 250                 # resample target (Hz)
   epoch_len_s: 4.0
   epoch_samples: 1000        # epoch_len_s * sfreq
-  broadband_hz: [1.0, 40.0]  # EEGNet cache
-  # Filter design. DEFAULT, to be confirmed by R02 (see docs/CONTRACTS.md "Open items").
+  broadband_hz: [1.0, 40.0]  # continuous-data band-pass (MNE zero-phase FIR); = EEGNet cache band
+  notch_hz: 50               # power line; notched with all harmonics below raw Nyquist (50..450)
+  reference: average         # common average reference over the 32 EEG channels (recorded ref CPz)
+  # Trial rejection (decided by R02, see docs/DATA_NOTES.md). Peak-to-peak of the
+  # broadband imagery epoch on the candidate channels only: no EOG and no ICA,
+  # so frontal blinks would reject most trials if all 32 channels were used.
+  reject:
+    ptp_uv: 150.0
+    channels: candidates     # candidates | all
+    period: imagery          # the same trials are dropped from all three caches
+  # Per-band filter design for the FBCSP / view caches (applied to padded epochs).
   filter:
     method: butter_sosfiltfilt   # zero-phase IIR
     order: 4
@@ -47,7 +57,10 @@ preprocess:
   units: uV
 
 channels:
-  # PLACEHOLDER until R02 checks channels.tsv. Order defines chromosome bits 0-7.
+  # CONFIRMED by R02 against channels.tsv / electrodes.tsv (Neuracle NeuSenW32, 32 EEG,
+  # no EOG). The cap has no POz, PO7 or PO8: POz -> Pz (nearest unused, 38 mm; PO3/PO4
+  # are 39 mm but would break the midline/symmetry), PO7 -> P7, PO8 -> P8 (30 mm).
+  # See docs/DATA_NOTES.md. Order defines chromosome bits 0-7.
   candidates: [O1, Oz, O2, Pz, P3, P4, P7, P8]
 
 bands:

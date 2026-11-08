@@ -1,8 +1,7 @@
 """Tests for src/ga.py and experiments/run_ga.py.
 
-Until R01's ``fbcsp.evaluate`` exists, fitness comes from stand-ins with the
-same signature: a cheap toy function (machinery tests) and the contract-like
-stand-in FBCSP in ``experiments/_standin_fbcsp.py`` (synthetic-data tests).
+Machinery tests use a cheap toy fitness with the ``fbcsp.evaluate`` signature
+(``ga.set_evaluate_fn``). Synthetic-data tests use R01's real ``fbcsp.evaluate``.
 """
 import json
 
@@ -10,11 +9,9 @@ import numpy as np
 import pytest
 
 from experiments import _common as C
-from experiments import _standin_fbcsp as sf
-from src import chromosome, ga, results, synth
+from src import chromosome, fbcsp, ga, results, synth
 from src.config import load_config
 
-pytestmark = pytest.mark.filterwarnings("ignore:src.cv.:RuntimeWarning")
 
 CFG = load_config()
 O1, O2 = (CFG["channels"]["candidates"].index(c) for c in ("O1", "O2"))
@@ -182,7 +179,6 @@ def test_reproducible_with_fixed_seed(runner):
 
 def test_reproducible_on_synthetic_with_fbcsp(synth_dir):
     d, splits = C.load_unit("fbcsp", "91", "01", CFG, synth_dir)
-    ga.set_evaluate_fn(sf.evaluate)
     a = ga.run_nsga(d["X"], d["y"], d["block"], splits[0][0], small_cfg(10, 3), seed=3)
     b = ga.run_nsga(d["X"], d["y"], d["block"], splits[0][0], small_cfg(10, 3), seed=3)
     assert [chromosome.to_str(e["bits"]) for e in a["pareto"]] == \
@@ -194,7 +190,6 @@ def test_reproducible_on_synthetic_with_fbcsp(synth_dir):
 @pytest.mark.slow
 def test_selects_informative_channels_on_synthetic(synth_dir):
     """O1 and O2 carry the class effect; they must be chosen more often than chance."""
-    ga.set_evaluate_fn(sf.evaluate)
     cfg = small_cfg(16, 6)
     chosen = []
     for sub in ("91", "92"):
@@ -210,19 +205,50 @@ def test_selects_informative_channels_on_synthetic(synth_dir):
 
 
 # ----------------------------------------------------------------- run_ga end to end
+def test_ga_passes_the_same_X_object_to_evaluate():
+    """fbcsp caches covariances by id(X): every call must get the caller's array itself."""
+    X, y, block = toy_data()
+    seen = set()
+    rec = RecordingEval()
+
+    def spy(Xa, *a, **k):
+        seen.add(id(Xa))
+        return rec(Xa, *a, **k)
+
+    ga.set_evaluate_fn(spy)
+    ga.run_nsga(X, y, block, np.flatnonzero(block != 0), small_cfg(), seed=0)
+    assert seen == {id(X)}
+
+
+def test_real_fbcsp_cache_is_hit(synth_dir):
+    d, splits = C.load_unit("fbcsp", "91", "01", CFG, synth_dir)
+    fbcsp.clear_cache()
+    ga.run_nsga(d["X"], d["y"], d["block"], splits[0][0], small_cfg(6, 2), seed=0)
+    assert len(fbcsp._COV_CACHE) == 1   # one covariance computation for the whole GA run
+
+
 def test_run_ga_cli_end_to_end_and_resume(synth_dir, tmp_path, capsys):
     from experiments import run_ga
-    args = ["--method", "stability", "--subjects", "sub-91", "--protocol", "block",
+    args = ["--method", "ga_nsga", "--subjects", "sub-91", "--protocol", "block",
             "--sessions", "01", "--seeds", "0", "--n-jobs", "1", "--pop-size", "6",
             "--n-generations", "2", "--cache-dir", str(synth_dir), "--results-dir",
-            str(tmp_path), "--allow-standin-fbcsp"]
+            str(tmp_path)]
     assert run_ga.main(args) == 0
     p = tmp_path / "ga_nsga" / "sub-91_ses-01_seed-0.json"
     rec = json.loads(p.read_text())
     results.validate_result(rec)
     assert rec["protocol"] == "block" and len(rec["per_fold"]) == 4
     assert [f["fold"] for f in rec["per_fold"]] == [0, 1, 2, 3]
-    assert rec["fbcsp_impl"] == "standin" and rec["infer_time_ms"] > 0
+    assert rec["infer_time_ms"] > 0 and rec["synthetic"] is True
+    d, splits = C.load_unit("fbcsp", "91", "01", CFG, synth_dir)
+    for f, (tr, te) in zip(rec["per_fold"], splits):
+        assert f["n_test"] == len(te) == len(f["y_true"]) == len(f["y_pred"])
+        assert f["test_trial_id"] == d["trial_id"][te].tolist()
+        assert f["y_true"] == d["y"][te].tolist()
+        bal = np.mean([np.mean(np.array(f["y_pred"])[np.array(f["y_true"]) == c] == c)
+                       for c in range(3)])
+        assert f["ba"] == pytest.approx(bal)
+        assert f["pareto"] and f["n_evals"] > 0
     side = json.loads((tmp_path / "pareto" / "ga_nsga" / "sub-91_ses-01_seed-0.json").read_text())
     assert len(side["folds"]) == 4 and all(f["pareto"] for f in side["folds"])
 
@@ -242,10 +268,12 @@ def test_run_ga_cross_session(synth_dir, tmp_path):
     run_ga.main(["--method", "accuracy_only", "--subjects", "91", "--protocol",
                  "cross_session", "--seeds", "1", "--n-jobs", "1", "--pop-size", "6",
                  "--n-generations", "2", "--cache-dir", str(synth_dir), "--results-dir",
-                 str(tmp_path), "--allow-standin-fbcsp"])
+                 str(tmp_path)])
     rec = json.loads((tmp_path / "ga_single" / "sub-91_ses-01to02_seed-1.json").read_text())
     results.validate_result(rec)
     assert rec["session"] == "01to02" and len(rec["per_fold"]) == 1
+    f = rec["per_fold"][0]
+    assert f["n_train"] == 120 and f["n_test"] == 120 and len(f["y_pred"]) == 120
 
 
 def test_parse_subjects():

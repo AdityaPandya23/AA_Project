@@ -1,103 +1,34 @@
-"""Helpers shared by ``run_ga.py`` and ``run_eegnet.py``.
+"""GA / EEGNet-specific helpers for ``run_ga.py`` and ``run_eegnet.py`` (R07).
 
-* ``cv_*``: call ``src.cv``; while it is still a stub, fall back to a
-  local implementation that follows CONTRACTS.md §e literally. Once the real
-  ``src.cv`` exists it is used automatically and the fallback is dead code.
-* ``resolve_fbcsp``: the real ``src.fbcsp`` if implemented, otherwise the
-  stand-in, but only when explicitly allowed.
-* subject / session parsing and data loading.
+Everything shared with the FBCSP experiments (cache loading, ``git_commit``,
+cache-dir resolution, cross-session subject list, FBCSP latency) lives in
+R01's :mod:`experiments.common` and is reused from there. This module adds
+only what those experiments do not need:
+
+* subject-range parsing for the CLIs (``sub-17..sub-22``);
+* the list of (subject, session) units of a protocol, and loading one unit with its outer splits;
+* the per-fold prediction keys shared by every method (``y_true``, ``y_pred``,
+  ``n_test``, ``test_trial_id``, ...);
+* atomic JSON writes for crash-safe checkpoints.
 """
 from __future__ import annotations
 
 import json
 import os
 import re
-import socket
-import subprocess
 import sys
-import warnings
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Sequence
 
 import numpy as np
 
-from src import cache, cv
+from src import cv
+
+from .common import cross_session_subjects, load
 
 Split = tuple[np.ndarray, np.ndarray]
 
 
-# ----------------------------------------------------------------- cv fallbacks
-def _warn_fallback(name: str) -> None:
-    warnings.warn(f"src.cv.{name} is not implemented yet; using the contract fallback "
-                  f"in experiments/_common.py", RuntimeWarning, stacklevel=3)
-
-
-def cv_block_splits(block: np.ndarray) -> list[Split]:
-    """``src.cv.block_splits`` or its CONTRACTS §e fallback."""
-    try:
-        return cv.block_splits(block)
-    except NotImplementedError:
-        _warn_fallback("block_splits")
-    block = np.asarray(block)
-    idx = np.arange(block.size, dtype=np.int64)
-    return [(idx[block != b], idx[block == b]) for b in np.unique(block)]
-
-
-def cv_cross_session(n_train: int, n_test: int) -> list[Split]:
-    """``src.cv.cross_session`` or its CONTRACTS §e fallback."""
-    try:
-        return cv.cross_session(n_train, n_test)
-    except NotImplementedError:
-        _warn_fallback("cross_session")
-    return [(np.arange(n_train, dtype=np.int64),
-             np.arange(n_train, n_train + n_test, dtype=np.int64))]
-
-
-def cv_concat_sessions(d1: dict[str, Any], d2: dict[str, Any], kind: str) -> dict[str, Any]:
-    """``src.cv.concat_sessions`` or its CONTRACTS §e fallback."""
-    try:
-        return cv.concat_sessions(d1, d2, kind)
-    except NotImplementedError:
-        _warn_fallback("concat_sessions")
-    axis = 0 if kind == "eegnet" else 2
-    out: dict[str, Any] = {}
-    for k in set(d1) | set(d2):
-        if k == "X":
-            out[k] = np.concatenate([d1[k], d2[k]], axis=axis)
-        elif k in ("y", "trial_id"):
-            out[k] = np.concatenate([d1[k], d2[k]])
-        elif k == "block":
-            out[k] = np.concatenate([d1[k], d2[k] + 4])
-        else:
-            if k not in d1 or k not in d2 or not np.array_equal(d1[k], d2[k]):
-                raise ValueError(f"concat_sessions: key {k!r} differs between sessions")
-            out[k] = d1[k]
-    return out
-
-
-# ----------------------------------------------------------------- fbcsp
-def resolve_fbcsp(allow_standin: bool) -> tuple[Callable, type, str]:
-    """Return ``(evaluate, FBCSPLDA, impl_name)``.
-
-    Uses ``src.fbcsp`` when it is implemented. Otherwise uses the stand-in if
-    ``allow_standin`` and raises ``RuntimeError`` if not.
-    """
-    from src import fbcsp
-    rng = np.random.default_rng(0)
-    Xs = rng.standard_normal((12, 1, 2, 50)).astype(np.float32)
-    ys = np.repeat([0, 1, 2], 4)
-    try:
-        fbcsp.FBCSPLDA().fit(Xs, ys).predict(Xs)
-        return fbcsp.evaluate, fbcsp.FBCSPLDA, "src.fbcsp"
-    except NotImplementedError:
-        if not allow_standin:
-            raise RuntimeError("src.fbcsp is still a stub. Pass --allow-standin-fbcsp to use "
-                               "experiments/_standin_fbcsp.py (development only).") from None
-    from experiments import _standin_fbcsp as sf
-    return sf.evaluate, sf.FBCSPLDA, "standin"
-
-
-# ----------------------------------------------------------------- CLI parsing
 def parse_subjects(tokens: list[str]) -> list[str]:
     """``["sub-17..sub-22", "05", "sub-91"]`` -> ``["05", "17", ..., "22", "91"]``.
 
@@ -119,75 +50,74 @@ def parse_subjects(tokens: list[str]) -> list[str]:
 
 
 def recordings(protocol: str, subjects: list[str], sessions: list[str], kind: str,
-               cfg: dict[str, Any], cache_dir: Path | None) -> list[tuple[str, str]]:
-    """``(subject, session_label)`` units for a protocol, skipping missing caches.
+               cfg: dict[str, Any], cache_dir: Path) -> list[tuple[str, str]]:
+    """``(subject, session_label)`` units of a protocol, skipping missing caches.
 
-    ``block``: one per existing ``sub/ses`` file. ``cross_session``: ``(sub,
-    "01to02")`` when both sessions exist.
+    ``block``: one per existing ``sub/ses`` file. ``cross_session``:
+    ``(sub, "01to02")`` for subjects with both sessions.
     """
+    from src import cache
     have = set(cache.list_cached(kind, cfg, cache_dir))
     units = []
-    for s in subjects:
-        if protocol == "block":
+    if protocol == "block":
+        for s in subjects:
             for ses in sessions:
                 if (s, ses) in have:
                     units.append((s, ses))
                 else:
                     print(f"[skip] no {kind} cache for sub-{s} ses-{ses}", file=sys.stderr)
-        elif protocol == "cross_session":
-            if (s, "01") in have and (s, "02") in have:
+    elif protocol == "cross_session":
+        both = set(cross_session_subjects(cfg, cache_dir, kind))
+        for s in subjects:
+            if s in both:
                 units.append((s, "01to02"))
             else:
                 print(f"[skip] sub-{s}: cross_session needs ses-01 and ses-02", file=sys.stderr)
-        else:
-            raise ValueError(f"unsupported protocol {protocol!r}")
+    else:
+        raise ValueError(f"unsupported protocol {protocol!r}")
     return units
 
 
 def load_unit(kind: str, subject: str, session: str, cfg: dict[str, Any],
-              cache_dir: Path | None) -> tuple[dict[str, Any], list[Split]]:
+              cache_dir: Path) -> tuple[dict[str, Any], list[Split]]:
     """Load data and outer splits for one unit (``session`` may be ``"01to02"``)."""
     if session == "01to02":
-        d1 = cache.load_cache(kind, subject, "01", cfg, cache_dir)
-        d2 = cache.load_cache(kind, subject, "02", cfg, cache_dir)
-        d = cv_concat_sessions(d1, d2, kind)
-        return d, cv_cross_session(len(d1["y"]), len(d2["y"]))
-    d = cache.load_cache(kind, subject, session, cfg, cache_dir)
-    return d, cv_block_splits(d["block"])
+        d1 = load(kind, subject, "01", cfg, cache_dir)
+        d2 = load(kind, subject, "02", cfg, cache_dir)
+        d = cv.concat_sessions(d1, d2, kind)
+        return d, cv.cross_session(len(d1["y"]), len(d2["y"]))
+    d = load(kind, subject, session, cfg, cache_dir)
+    return d, cv.block_splits(d["block"])
 
 
-# ----------------------------------------------------------------- provenance
-def git_commit() -> str | None:
-    try:
-        return subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True,
-                              text=True, check=True, cwd=Path(__file__).resolve().parent.parent
-                              ).stdout.strip() or None
-    except Exception:
-        return None
+def prediction_keys(train_idx: np.ndarray, test_idx: np.ndarray, y_pred: Sequence[int],
+                    d: dict[str, Any]) -> dict[str, Any]:
+    """Per-fold extra keys, the same as R01's FBCSP experiments write.
+
+    ``y_true`` / ``y_pred`` / ``test_trial_id`` are aligned with ``test_idx``.
+    """
+    y_pred = np.asarray(y_pred)
+    if y_pred.shape != (len(test_idx),):
+        raise ValueError("y_pred must have one entry per test trial")
+    return {"n_train": int(len(train_idx)), "n_test": int(len(test_idx)),
+            "test_blocks": sorted(int(b) for b in np.unique(d["block"][test_idx])),
+            "test_trial_id": d["trial_id"][test_idx].tolist(),
+            "y_true": d["y"][test_idx].tolist(), "y_pred": [int(v) for v in y_pred]}
 
 
-def host_tag() -> str:
-    """``AA_HOST`` (``R01``/``R02``/``R07``) if set, else the hostname."""
-    return os.environ.get("AA_HOST") or socket.gethostname()
+def provenance(d: dict[str, Any]) -> dict[str, Any]:
+    """Top-level extra keys shared with R01's records (``synthetic``, ``host``)."""
+    out: dict[str, Any] = {"synthetic": bool(d.get("synthetic", False))}
+    if os.environ.get("AA_HOST"):
+        out["host"] = os.environ["AA_HOST"]
+    return out
 
 
 def atomic_write_json(obj: Any, path: Path) -> Path:
-    """Write JSON via a temp file + rename, so a crash never leaves a half file."""
+    """Write JSON via a temp file + rename, so a crash never leaves a half-written file."""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(obj, f, indent=2)
     os.replace(tmp, path)
     return path
-
-
-def per_trial_latency_ms(predict: Callable[[np.ndarray], Any], Xtest: np.ndarray,
-                         max_trials: int = 50) -> float:
-    """Mean wall time (ms) of ``predict`` on single trials (batch size 1)."""
-    import time
-    n = min(len(Xtest), max_trials)
-    predict(Xtest[:1])  # warm-up
-    t0 = time.perf_counter()
-    for i in range(n):
-        predict(Xtest[i:i + 1])
-    return (time.perf_counter() - t0) * 1000.0 / n

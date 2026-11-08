@@ -11,7 +11,6 @@ from experiments import _common as C  # noqa: E402
 from src import cache, eegnet, results, synth  # noqa: E402
 from src.config import load_config  # noqa: E402
 
-pytestmark = pytest.mark.filterwarnings("ignore:src.cv.:RuntimeWarning")
 CFG = load_config()
 
 
@@ -50,6 +49,7 @@ def test_evaluate_eegnet_smoke_and_reproducible(synth_dir):
     r1 = eegnet.evaluate_eegnet(d["X"], d["y"], splits[:2], cfg=quick_cfg(seed=1))
     assert set(r1) >= {"per_fold", "ba_mean", "ba_std", "train_time_s", "infer_time_ms"}
     assert len(r1["per_fold"]) == 2 and r1["train_time_s"] > 0 and r1["infer_time_ms"] > 0
+    assert [len(p) for p in r1["y_pred"]] == [len(te) for _, te in splits[:2]]
     assert r1["device"] == ("cuda" if torch.cuda.is_available() else "cpu")
     r2 = eegnet.evaluate_eegnet(d["X"], d["y"], splits[:2], cfg=quick_cfg(seed=1))
     assert r1["per_fold"] == r2["per_fold"]
@@ -73,6 +73,9 @@ def test_run_eegnet_cli(synth_dir, tmp_path):
         results.validate_result(rec)
         assert rec["n_channels"] == n and len(rec["per_fold"]) == 4
         assert all(f["chosen_bits"] is None and f["n_features"] > 0 for f in rec["per_fold"])
+        for f in rec["per_fold"]:
+            assert f["n_test"] == len(f["y_true"]) == len(f["y_pred"]) == len(f["test_trial_id"])
+        assert rec["infer_time_ms"] > 0 and rec["infer_time_ms_batch1"] > 0
     run_eegnet.main(["--channels", "8", "--subjects", "91", "--protocol", "cross_session",
                      "--seeds", "2", "--max-epochs", "2", "--cache-dir", str(synth_dir),
                      "--results-dir", str(tmp_path)])

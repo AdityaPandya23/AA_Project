@@ -15,15 +15,21 @@ must never be seen. This is asserted in code (:func:`_check_nesting`).
 
 Implementation hooks (not part of the contract):
 
-* :func:`set_evaluate_fn` replaces ``fbcsp.evaluate`` (stand-in while R01's
-  implementation is pending, and in tests). ``None`` restores the default.
-* While ``src.cv.inner_splits`` is a stub, a local fallback that follows
-  CONTRACTS.md §e literally is used.
+* :func:`set_evaluate_fn` replaces ``fbcsp.evaluate`` (tests only). ``None``
+  restores the default.
+
+Performance (R01's notes, CONTRACT_ISSUES.md §3): ``fbcsp.evaluate`` caches
+per-trial covariances by the identity of ``X``. The GA therefore passes the
+**same** ``X`` object to every call (no copy, slice or ``asarray`` that
+could copy) and never modifies it. ``evaluate`` pins BLAS to 1 thread, so
+parallelism belongs one level up: ``experiments/run_ga.py`` runs folds,
+subjects and seeds as separate joblib jobs. Individuals are evaluated
+sequentially inside a job, because shipping ``X`` to worker processes would
+create a new object per call and miss the cache.
 """
 from __future__ import annotations
 
 import time
-import warnings
 from typing import Any, Callable
 
 import numpy as np
@@ -59,18 +65,7 @@ def _evaluate_fn() -> EvaluateFn:
 def _inner_splits(y: np.ndarray, block: np.ndarray, train_idx: np.ndarray,
                   n: int, seed: int) -> list[Split]:
     from . import cv
-    try:
-        return cv.inner_splits(y, block, train_idx, n=n, seed=seed)
-    except NotImplementedError:
-        warnings.warn("src.cv.inner_splits is not implemented yet; using the contract "
-                      "fallback in src/ga.py", RuntimeWarning, stacklevel=2)
-    from sklearn.model_selection import StratifiedGroupKFold
-    train_idx = np.asarray(train_idx, dtype=np.int64)
-    sgkf = StratifiedGroupKFold(n_splits=n, shuffle=True, random_state=seed)
-    out = []
-    for tr, te in sgkf.split(np.zeros(train_idx.size), y[train_idx], groups=block[train_idx]):
-        out.append((np.sort(train_idx[tr]).astype(np.int64), np.sort(train_idx[te]).astype(np.int64)))
-    return out
+    return cv.inner_splits(y, block, train_idx, n=n, seed=seed)
 
 
 def _check_nesting(splits: list[Split], train_idx: np.ndarray, n_total: int) -> None:
@@ -159,7 +154,8 @@ def _run(X, y, block, train_idx, cfg, seed, n_obj: int):
     from pymoo.optimize import minimize
 
     t0 = time.perf_counter()
-    X = np.asarray(X)
+    if not isinstance(X, np.ndarray):
+        raise TypeError("X must be a numpy array (passed through unchanged for the fbcsp cache)")
     y = np.asarray(y)
     block = np.asarray(block)
     train_idx = np.unique(np.asarray(train_idx, dtype=np.int64))

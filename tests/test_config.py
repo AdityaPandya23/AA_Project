@@ -5,7 +5,7 @@ from src.config import config_hash, load_config, repo_root
 
 def test_defaults_relative_to_repo():
     cfg = load_config()
-    assert cfg["paths"]["data_dir"] == repo_root() / "data"
+    assert cfg["paths"]["data_dir"] == repo_root() / "data" / "raw"  # BIDS root (R02)
     assert cfg["paths"]["cache_dir"] == repo_root() / "cache"
 
 
