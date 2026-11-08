@@ -37,6 +37,37 @@ them per machine:
 
 `data/`, `cache/` and `results/raw/` are git-ignored.
 
+## Building the cache on another machine
+
+There is no shared data folder. Every machine downloads the raw data from
+figshare and builds its own cache from the same commit, then checks it against
+the reference manifest built on R02 (`docs/manifest_reference.csv`).
+
+```bash
+python -m venv .venv
+# Windows: .venv\Scripts\activate    Linux/macOS: source .venv/bin/activate
+pip install -r requirements.txt
+python -m scripts.download --subjects <ids>                 # e.g. 09 10 11 12 13 14 15 16; omit for all
+python -m scripts.build_cache --subjects <ids> --n-jobs 3   # 2-3 workers on an 8 GB machine
+python -m scripts.check_manifest                            # must print OK
+```
+
+| Machine | Subjects | Raw download | Cache |
+|---|---|---|---|
+| R02 | all (reference) | ~44 GB | 2.7 GB |
+| R01 | 09–16 | ~16 GB | ~1 GB |
+| R07 | all (EEGNet needs every subject) | ~44 GB | 2.7 GB |
+
+The download is resumable and MD5-checked. About 12 GB of it is the zips in
+`data/raw/_zips/`, which can be deleted once `check_manifest` prints OK. Keep
+`data/raw/sub-*` only if you may need to rebuild the cache after a change to
+`src/io.py`, `src/preprocess.py` or `config.yaml`.
+
+`check_manifest` compares, per local recording, the trials kept per class and
+block, the rejected trial ids and the config hash. If it reports mismatches,
+first check that you are on the same commit as the reference and that
+`config.yaml` is unchanged.
+
 ## Developing without real data
 
 ```bash
