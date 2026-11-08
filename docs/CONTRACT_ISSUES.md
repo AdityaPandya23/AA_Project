@@ -5,6 +5,21 @@ Found while implementing `src/cv.py`, `src/fbcsp.py` and `src/analysis.py`
 does now and what I propose. Items marked *decision needed* need agreement before
 anyone edits `CONTRACTS.md`.
 
+### Open decisions (summary, 2026-11-08)
+
+| # | Question | Default in code now | Who decides |
+|---|---|---|---|
+| 2 | `inner_splits` with fewer blocks than folds: fall back or raise? | warn + `StratifiedKFold` fallback | GA owner + contract owner |
+| 5 | Paired tests: n = subjects (sessions averaged)? | n = subjects | contract owner |
+| 6 | Make `y_true` / `y_pred` / `n_test` expected per-fold keys for every method | written by FBCSP experiments only | contract owner; R07 + GA owner to write them |
+| 7 | Where `pareto` lives (inside `per_fold` vs side file) | both read (see 12) | GA owner + contract owner |
+| 11 | NSGA-II final choice: "within 1 SD" threshold | 1 SD, as in §g | everyone, after the real runs |
+| 12 | EEGNet method names (`eegnet` vs `eegnet_32ch`, `eegnet_8ch`) | all accepted by analysis | contract owner |
+
+PR #4 (branch `ga`) has its own list of items for §g/§h/§i (EEGNet seed, `b*`
+tie rule, GA operators in config, `infer_time_ms` batch size, `train_time_s`
+under parallel folds). When the two files are merged, keep both lists.
+
 ## 1. `concat_sessions` output fails the cache validator (§e vs `cache.py`)
 
 `concat_sessions` offsets ses-02 blocks by +4 (blocks 4..7), but
@@ -135,18 +150,64 @@ and viewing-vs-imagery summaries. The viewing runs are written as
   signatures are unchanged.
 * Results produced from the synthetic cache carry `"synthetic": true`.
 
+## 11. NSGA-II selection rule may favour too-small chromosomes (§g) — *decision needed after real runs*
+
+§g picks the lowest-cost Pareto solution with `ba_mean >= b*.ba_mean - b*.ba_std`.
+With 3 inner folds of ~30 trials each, the inner SD can be large (not yet measured on real data),
+so almost every solution passes the threshold and the cheapest one wins.
+
+Observed with the full budget (pop 30, 20 generations), synthetic sub-91 ses-01,
+real `fbcsp.evaluate`, PR #4 code:
+
+| Method | Outer BA per fold | Chosen chromosomes |
+|---|---|---|
+| `ga_nsga` | 0.47, 0.37, 0.40, 0.30 | 2–4 channels, 1–2 bands, 1–2 windows |
+| `ga_single` | 0.70, 0.43, 0.57, 0.67 | 3 channels, 1–2 bands, 4–6 windows |
+
+This is one synthetic subject, so it is a warning, not a result.
+
+*Proposal:* no change before the real runs. The run_ga side files store every
+per-fold Pareto front, so alternative thresholds can be compared **offline**:
+`k · SD` with `k ∈ {0, 0.5, 1}` and `SE = SD / √n_inner`. Each needs only one
+FBCSP refit per outer fold, with no new GA search. Report the gap between the
+inner-CV and outer BA per method, as direct evidence for or against the
+stability claim. Choose the rule before the results are written up, and record it in §g.
+
+## 12. Reading `experiments/run_ga.py` / `run_eegnet.py` outputs (§i / §j)
+
+*Now (branch `analysis-integration`):*
+
+* `load_results` attaches Pareto fronts from run_ga's side file
+  `{dir}/pareto/{method}/<same name>.json` (`{"folds": [{fold, chosen_bits, pareto}]}`),
+  matched by fold number, when the main JSON has none. `load_results` still reads
+  only `{dir}/{method}/*.json`, so `pareto/` and `raw/partial/` are never read as
+  results.
+* Results with `fbcsp_impl == "standin"` get a `standin` column and a
+  `RuntimeWarning`, so development results cannot slip into the paper tables unnoticed.
+* `eegnet_32ch` is treated as an alias of `eegnet` (same colour and order).
+  `eegnet_8ch` gets its own colour and label. *Proposal:* the contract owner
+  picks one naming. The analysis needs no change either way.
+
 ---
 
 # R07 (GA / EEGNet)
 
 Found while implementing `src/ga.py`, `src/eegnet.py`, `experiments/run_ga.py`
 and `experiments/run_eegnet.py` (branch `ga`). **No contract was changed.**
-R01's items above are unchanged. R07 follows them: items 3 (same-`X` rule, no
+R01's items above (1–12 and the summary table) are unchanged. R07 follows them: items 3 (same-`X` rule, no
 in-place edits, BLAS pinned to 1 thread → joblib across folds, subjects and seeds), 6
 (per-fold `y_true`, `y_pred`, `n_test`, `test_trial_id`, `n_train`,
 `test_blocks`) and 7 (`pareto` inside each `per_fold[k]`).
 
-## R07-1. EEGNet method names do not match §i — *decision needed*
+**R07 answers to the summary table:** #2: keep the warn + `StratifiedKFold`
+fallback (the block and cross-session protocols never trigger it; the GA's own
+nesting assertion still guarantees indices stay in `train_idx`). #6: done for
+`ga_nsga`, `ga_single`, `eegnet_32ch` and `eegnet_8ch`. #7: R07 writes both
+(`per_fold[k]["pareto"]` and the side file). Either can become the contract
+location. #11: R07 will run the offline threshold comparison from the saved
+fronts after the real runs.
+
+## R07-1. EEGNet method names do not match §i — *decision needed* (= R01 #12)
 
 The task specified `results/eegnet_32ch/` and `results/eegnet_8ch/`. §i only
 defines `eegnet` (all 32 channels) and `eegnet_gach` (GA-chosen channels). EEGNet
@@ -157,9 +218,8 @@ name is in `config.evaluation.methods`.
 `--method-name eegnet --channels 32` writes the contract name instead.
 *Proposal:* add `eegnet_8ch` to §i and `config.evaluation.methods`, and either
 rename `eegnet_32ch` to `eegnet` or list both.
-**Request for R01 (`src/analysis.py`):** whichever names are agreed, add them to
-`METHOD_ORDER`, `METHOD_LABELS` and `METHOD_MARKERS`. Unknown methods already
-work (they sort last and show the raw name), so nothing is broken in the meantime.
+*Resolved on the analysis side by PR #6:* `eegnet_32ch` is an alias of `eegnet`, and
+`eegnet_8ch` has its own label and marker. Only the contract naming is left.
 
 ## R07-2. `evaluate_eegnet` has no seed argument (§h)
 
@@ -203,13 +263,14 @@ Folds run as separate processes, so `train_time_s` is the **sum** of the
 per-fold wall times (GA plus final fit), not the elapsed time of the run. The extra
 key `ga_time_s` (top level and per fold) holds the GA search alone.
 
-## R07-7. Pareto side files and crash-resume checkpoints
+## R07-7. Pareto side files and crash-resume checkpoints (= R01 #7, #12; resolved)
 
 The fronts are stored in `per_fold[k]["pareto"]` (R01 item 7) **and** in a side
 file `{results_dir}/pareto/{method}/sub-XX_ses-YY_seed-Z.json`.
 Checkpoints are in `{results_dir}/raw/partial/{method}/..._fold-k.json`
-(git-ignored). `analysis.load_results` globs `*/*.json`, so it reads neither,
-which is correct. *Proposal:* §j should reserve `pareto/` and `raw/` as
+(git-ignored). `analysis.load_results` reads only `{dir}/{method}/*.json`, so it
+never reads either as a result, and since PR #6 it attaches side-file fronts when the
+main JSON has none. *Proposal:* §j should reserve `pareto/` and `raw/` as
 non-method directories.
 
 ## R07-8. EEGNet training details not in config (open item 9)
@@ -237,10 +298,8 @@ machine. **No smaller budget is needed.** There is even room to raise `pop_size`
 The CLIs accept `17`, `sub-17`, `17..22`, `sub-17..sub-22` and `17-22`, and
 always write the contract's 2-digit label.
 
-## Requests for R01 (no change needed in `cv.py` or `fbcsp.py`)
+## Requests for R01
 
-* `src/analysis.py`: method names from R07-1, once agreed.
-* Nothing else. `cv.inner_splits`, `cv.concat_sessions` and `fbcsp.evaluate`
-  (including `y_pred` and the covariance cache) work as they are, and
-  `tests/test_ga.py::test_real_fbcsp_cache_is_hit` checks that one GA run
-  computes the covariances once.
+None left. PR #6 covered the method names and the side files. `cv.py` and
+`fbcsp.py` work as they are. `tests/test_ga.py::test_real_fbcsp_cache_is_hit`
+checks that one GA run computes the covariances once.
