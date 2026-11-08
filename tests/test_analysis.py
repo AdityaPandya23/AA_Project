@@ -254,3 +254,50 @@ def test_make_tables(fake_dir, tmp_path):
     text = md.read_text(encoding="utf-8")
     assert text.count("\n| ") >= 1 + len(METHODS) and "Friedman" in text
     assert (tmp_path / "per_subject.csv").exists()
+
+
+# ------------------------------------------------- integration with experiments/run_ga.py
+def _run_ga_layout(fake_dir, out, impl="src.fbcsp"):
+    """Rewrite one fake ga_nsga result in run_ga's layout: Pareto fronts in a side file."""
+    src = next((fake_dir / "ga_nsga").glob("*.json"))
+    rec = json.loads(src.read_text())
+    side = {"method": rec["method"], "subject": rec["subject"], "session": rec["session"],
+            "seed": rec["seed"], "protocol": rec["protocol"],
+            "folds": [{"fold": f["fold"], "chosen_bits": f["chosen_bits"],
+                       "pareto": f.pop("pareto")} for f in rec["per_fold"]]}
+    rec["fbcsp_impl"] = impl
+    (out / "ga_nsga").mkdir(parents=True)
+    (out / "pareto" / "ga_nsga").mkdir(parents=True)
+    (out / "ga_nsga" / src.name).write_text(json.dumps(rec))
+    (out / "pareto" / "ga_nsga" / src.name).write_text(json.dumps(side))
+    return side
+
+
+def test_load_results_reads_run_ga_pareto_side_file(fake_dir, tmp_path):
+    side = _run_ga_layout(fake_dir, tmp_path)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")  # real FBCSP -> no stand-in warning
+        d = A.load_results(tmp_path)
+    assert len(d) == 1  # the side file itself is not read as a result
+    folds = d.iloc[0]["per_fold"]
+    assert [f["pareto"] for f in folds] == [e["pareto"] for e in side["folds"]]
+    ex = A.explode_folds(d)
+    assert ex["pareto"].notna().all()
+
+
+def test_load_results_warns_on_standin_fbcsp(fake_dir, tmp_path):
+    _run_ga_layout(fake_dir, tmp_path, impl="standin")
+    with pytest.warns(RuntimeWarning, match="stand-in"):
+        d = A.load_results(tmp_path)
+    assert d["standin"].all()
+
+
+def test_eegnet_run_names():
+    assert A.method_color("eegnet_32ch") == A.method_color("eegnet")
+    assert A.method_color("eegnet_8ch") not in {A.method_color(m) for m in A.METHOD_ORDER[:5]}
+    assert A.method_label("eegnet_8ch") == "EEGNet (8 ch)"
+    assert A._sort_methods(["eegnet_8ch", "eegnet_32ch", "ga_nsga"]) == \
+        ["ga_nsga", "eegnet_32ch", "eegnet_8ch"]
+    # unknown methods never take a slot of a known one
+    known = {A.method_color(m) for m in A.METHOD_ORDER}
+    assert A.method_color("something_new") not in known
