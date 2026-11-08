@@ -68,3 +68,12 @@ def test_permute_within_blocks_keeps_block_balance():
     assert not np.array_equal(yp, y)
     for b in range(4):
         assert np.bincount(yp[block == b]).tolist() == [10, 10, 10]
+
+
+def test_summary_sd_is_sample_sd():
+    """Between-recording SDs use ddof=1, the same as reports/make_tables.py."""
+    from experiments.sanity import _mean
+    rows = [{"x": v} for v in (0.30, 0.35, 0.40, 0.45)]
+    m, sd, n = _mean(rows, "x")
+    assert n == 4 and np.isclose(m, 0.375) and np.isclose(sd, np.std([0.30, 0.35, 0.40, 0.45], ddof=1))
+    assert _mean([{"x": 0.4}], "x")[1] is None
