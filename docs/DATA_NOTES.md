@@ -110,12 +110,19 @@ recording checked has 4 blocks × 30 trials.
   interleaved**, not grouped. The number of class runs per block is 20–24,
   against 21.0 ± 2.5 for a random permutation of 10/10/10. Runs of up to 5
   identical shapes occur (e.g. `ppppscpc…`).
-* The order is a fixed pseudo-random sequence chosen per recording, but
-  **sequences are reused**. Among the first 20 recordings there are only 10
-  distinct sequences. One sequence (sub-01's) appears in 9 recordings: sub-01
-  ses-01 *and* ses-02, plus ses-02 of subjects 02, 03, 04, 05, 06, 08, 11.
-  sub-03/07 ses-01 share another, as do sub-06/10 ses-01. The full table is
-  produced by `tests/test_real_data.py` → see §6.
+* The order is a fixed pseudo-random 120-trial sequence per recording, but
+  **sequences are reused**: the 42 recordings use only 19 distinct sequences.
+  Recordings that share a sequence (`subject/session`):
+
+  | Shared sequence | Recordings |
+  |---|---|
+  | A (13) | 01/01 01/02 02/02 03/02 04/02 05/02 06/02 08/02 11/02 13/02 14/01 20/01 22/02 |
+  | B (5) | 03/01 07/01 14/02 15/02 16/02 |
+  | C (4) | 02/01 16/01 17/01 18/01 |
+  | D–G (2 each) | 04/01 22/01 · 06/01 10/01 · 07/02 12/02 · 18/02 21/01 |
+
+  The other 12 recordings have unique sequences. **Only sub-01 has the same
+  sequence in ses-01 and ses-02.**
 
 **Leakage implications**
 
@@ -127,13 +134,13 @@ recording checked has 4 blocks × 30 trials.
   Slow drifts (electrode impedance, alertness, alpha level) then become
   class-predictive. Expect `random` > `block`, and report `random` only for
   comparison with the literature.
-* *Cross-session* when both sessions share the same sequence (sub-01 so far):
+* *Cross-session* when both sessions share the same sequence (**sub-01 only**):
   class is confounded with trial position in exactly the same way in train and
   test. Any position-locked effect (e.g. first trials after a pause, fatigue
   over a block) can then transfer as spurious "shape" information. The effect
   is probably small, but a position-only control is cheap: predict class from
-  `trial_id % 30` or `block` only. The ses-01→ses-02 pairs that share a sequence
-  are listed in §6.
+  `trial_id % 30` only. Flag sub-01 in the cross-session results, or run them
+  with and without it.
 * Because sequences are shared across subjects too, any future cross-subject
   analysis has the same confound.
 
@@ -171,6 +178,19 @@ recording checked has 4 blocks × 30 trials.
 `cache/manifest.csv` has per-recording counts. Extra npz keys:
 `rejected_trial_id`, `n_rejected`, `n_out_of_range`, `reject_ptp_uv`, `ptp_uv`.
 
-### Per-recording result
+### Per-recording result (full build, 2026-11-08)
 
-_Filled in after the full build; see `cache/manifest.csv`._
+* **All 42 recordings built, none failed.** The events.tsv ↔ Status
+  cross-check passed everywhere. Every channels.tsv lists the same 32
+  channels, all `good`, so no channel was interpolated. No epoch ran off a
+  recording.
+* Rejection at 150 µV: **126 of 5040 trials (2.5 %)**, 4914 kept. The median
+  per recording is 1 (range 0–19), and 20 recordings lose none. The smallest
+  class in any recording has 33 trials.
+* Recordings with many rejections: sub-19 ses-02 (19), sub-06 ses-02 (13,
+  including a contiguous run, trials 51–59, i.e. an artifact episode in block 1),
+  sub-01 ses-01 (11), sub-10 ses-01 (11), sub-14 ses-02 (11), sub-14 ses-01 (9),
+  sub-09 ses-01 (9).
+* Median peak-to-peak of kept trials per recording: 23–109 µV (median 68).
+* Per-recording counts (per class, per block, rejected `trial_id`s) are in
+  `cache/manifest.csv`. Cache size: 2.7 GB.
