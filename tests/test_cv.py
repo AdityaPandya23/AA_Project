@@ -149,6 +149,22 @@ def test_concat_sessions_eegnet_axis0(recs):
     assert d["X"].shape == (240, 32, 1000)
 
 
+def test_concat_sessions_rejection_metadata(recs):
+    """Real caches carry per-recording rejection info that differs by session."""
+    d1, d2 = dict(recs[("91", "01")]), dict(recs[("91", "02")])
+    d1.update(rejected_trial_id=np.array([3, 7]), n_rejected=np.int64(2),
+              n_out_of_range=np.int64(0), reject_ptp_uv=np.float64(150.0),
+              ptp_uv=np.ones(120, np.float32))
+    d2.update(rejected_trial_id=np.array([], np.int64), n_rejected=np.int64(0),
+              n_out_of_range=np.int64(0), reject_ptp_uv=np.float64(150.0),
+              ptp_uv=np.zeros(120, np.float32))
+    d = cv.concat_sessions(d1, d2, "fbcsp")
+    assert d["ptp_uv"].shape == (240,)
+    assert [int(n) for n in d["n_rejected"]] == [2, 0]
+    assert d["rejected_trial_id"][0].tolist() == [3, 7]
+    assert float(d["reject_ptp_uv"]) == 150.0
+
+
 def test_concat_sessions_mismatch_raises(recs):
     d1, d2 = recs[("91", "01")], dict(recs[("91", "02")])
     d2["ch_names"] = d2["ch_names"][::-1].copy()

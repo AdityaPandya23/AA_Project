@@ -23,6 +23,11 @@ _TRIAL_KEYS = ("X", "y", "block", "trial_id")
 _X_TRIAL_AXIS = {"fbcsp": 2, "view": 2, "eegnet": 0}
 #: Block offset applied to the second session so blocks stay unique.
 SESSION_BLOCK_OFFSET = 4
+#: Optional per-trial extra keys (one value per trial), concatenated when both have them.
+_EXTRA_TRIAL_KEYS = ("ptp_uv",)
+#: Per-recording bookkeeping written by preprocessing. These legitimately differ
+#: between sessions, so they are kept per session as ``[value_ses1, value_ses2]``.
+_PER_RECORDING_KEYS = ("rejected_trial_id", "n_rejected", "n_out_of_range")
 
 
 def _split(train: np.ndarray, test: np.ndarray) -> Split:
@@ -132,6 +137,8 @@ def concat_sessions(d1: dict[str, Any], d2: dict[str, Any], kind: str) -> dict[s
     * ``kind="fbcsp"`` or ``"view"``: ``X`` is concatenated on axis 2. ``kind="eegnet"``: axis 0.
     * ``y``, ``trial_id``: concatenated.
     * ``block``: ``concat(block1, block2 + 4)`` so blocks stay unique.
+    * ``ptp_uv`` (per trial): concatenated. ``rejected_trial_id``, ``n_rejected``,
+      ``n_out_of_range`` (per recording): kept as ``[ses1_value, ses2_value]``.
     * Other keys (``ch_names``, ``band_names``, ...) are checked for equality
       and taken from ``d1``. A mismatch raises ``ValueError``.
 
@@ -162,8 +169,14 @@ def concat_sessions(d1: dict[str, Any], d2: dict[str, Any], kind: str) -> dict[s
     for k in ("y", "block", "trial_id"):
         if out[k].shape != (n1 + n2,):
             raise ValueError(f"{k} length does not match X along the trial axis")
+    for k in _EXTRA_TRIAL_KEYS:
+        if k in d1 and k in d2:
+            out[k] = np.concatenate([np.asarray(d1[k]), np.asarray(d2[k])])
+    for k in _PER_RECORDING_KEYS:
+        if k in d1 and k in d2:
+            out[k] = [d1[k], d2[k]]
     for k, v in d1.items():
-        if k in _TRIAL_KEYS or k == "session_idx":
+        if k in _TRIAL_KEYS or k in out or k == "session_idx":
             continue
         if k in d2 and not _equal(v, d2[k]):
             raise ValueError(f"key {k!r} differs between sessions")
