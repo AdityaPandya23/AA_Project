@@ -8,7 +8,9 @@ or `config.yaml`, so these numbers also hold for the integrated tree. Config
 Method: `fbcsp_all` = FBCSP + shrinkage LDA with all 19 genes on (8 channels × 4
 bands × 7 windows, 168 features). Chance = 0.333. Results:
 `results/baseline_all/fbcsp_all/` (62 JSONs) and `results/sanity/` (shuffled,
-random-split and viewing runs + `sanity_summary.{json,md}`).
+random-split and viewing runs + `sanity_summary.{json,md}`). SDs are sample SDs
+(`ddof=1`), as in `make_tables`; the committed `sanity_summary.*` still show
+population SDs, which are up to 0.001 lower (P2_REVIEW §3.1).
 
 Reproduce (about 4 min on 8 threads):
 
@@ -21,9 +23,9 @@ python -m experiments.sanity  --n-jobs -1
 
 | Protocol | n | Mean ± SD | Median | Range | Above chance, p < 0.05 (uncorrected / Holm) |
 |---|---|---|---|---|---|
-| Block (leave-one-block-out), per recording | 42 | **0.356 ± 0.060** | 0.350 | 0.233–0.476 | 10 / 2 |
-| Block, per subject (sessions averaged) | 22 | 0.353 ± 0.043 | | | group Wilcoxon > 1/3: p = 0.027 |
-| Cross-session (train ses-01 → test ses-02) | 20 | **0.337 ± 0.038** | 0.336 | 0.270–0.406 | 2 / 0 |
+| Block (leave-one-block-out), per recording | 42 | **0.356 ± 0.061** | 0.350 | 0.233–0.476 | 10 / 2 |
+| Block, per subject (sessions averaged) | 22 | 0.353 ± 0.044 | | | group Wilcoxon > 1/3: p = 0.027 |
+| Cross-session (train ses-01 → test ses-02) | 20 | **0.337 ± 0.039** | 0.336 | 0.270–0.406 | 2 / 0 |
 | Cross-session **without sub-01** | 19 | 0.333 | | | |
 
 * Per-recording test: label permutation on the stored fold predictions
@@ -48,7 +50,7 @@ has to beat.
 |---|---|---|
 | (a) Shuffled labels (within-block permutation, full refit) | 0.333 ± 0.050 | ✅ no leakage in the pipeline |
 | (b) Random stratified 5-fold vs block | 0.353 vs 0.356, inflation **−0.004** (18/42 higher) | ✅ no inflation for this baseline |
-| (c) Viewing (3–7 s) vs imagery | **0.438 ± 0.075** vs 0.356, +0.082 (32/42 higher) | ✅ perception decodes better, as expected |
+| (c) Viewing (3–7 s) vs imagery | **0.438 ± 0.076** vs 0.356, +0.082 (32/42 higher) | ✅ perception decodes better, as expected |
 
 * (b) DATA_NOTES §4 predicted that random splits would be optimistic, because
   neighbouring trials end up in both train and test. That does not happen with
