@@ -49,22 +49,33 @@ python -m venv .venv
 pip install -r requirements.txt
 python -m scripts.download --subjects <ids>                 # e.g. 09 10 11 12 13 14 15 16; omit for all
 python -m scripts.build_cache --subjects <ids> --n-jobs 3   # 2-3 workers on an 8 GB machine
-python -m scripts.check_manifest                            # must print OK
+python -m scripts.check_manifest --subjects <ids>           # must print OK; 'all' for all 22
 ```
 
 | Machine | Subjects | Raw download | Cache |
 |---|---|---|---|
 | R02 | all (reference) | ~44 GB | 2.7 GB |
-| R01 | 09–16 | ~16 GB | ~1 GB |
+| R01 | 09–16 | ~16 GB | ~0.9 GB |
 | R07 | all (EEGNet needs every subject) | ~44 GB | 2.7 GB |
 
-The download is resumable and MD5-checked. About 12 GB of it is the zips in
-`data/raw/_zips/`, which can be deleted once `check_manifest` prints OK. Keep
-`data/raw/sub-*` only if you may need to rebuild the cache after a change to
-`src/io.py`, `src/preprocess.py` or `config.yaml`.
+Building takes about 1–2.5 min per recording with 3 workers.
+
+The download is resumable and MD5-checked. The zips in `data/raw/_zips/` are
+about a quarter of it (12 GB of 44 GB for all subjects, 4 GB of 16 GB for
+09–16), and they can be deleted once `check_manifest` prints OK. The extracted
+`data/raw/sub-*` folders are the rest. Keep them only if you may need to
+rebuild the cache after a change to `src/io.py`, `src/preprocess.py` or
+`config.yaml`.
+
+**Shortcut:** instead of downloading the raw data, unzip a copy of R02's
+`cache/` folder (2.7 GB) into the repo root and run
+`python -m scripts.check_manifest --subjects all`. Nothing after preprocessing
+needs the raw data.
 
 `check_manifest` compares, per local recording, the trials kept per class and
-block, the rejected trial ids and the config hash. If it reports mismatches,
+block, the rejected trial ids and the config hash. Without `--subjects` it checks
+only the recordings that are present, so a recording that was never built goes
+unnoticed. With `--subjects` it also reports missing recordings. If it reports mismatches,
 first check that you are on the same commit as the reference and that
 `config.yaml` is unchanged.
 
