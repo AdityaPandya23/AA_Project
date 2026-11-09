@@ -188,10 +188,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--cache-dir", default=None)
     p.add_argument("--max-epochs-cap", type=int, default=None, help="smoke tests only")
     p.add_argument("--n-jobs", type=int, default=1,
-                   help="parallel runs sharing the GPU (about 300 MB each)")
+                   help="parallel runs (the GPU saturates at about 2; on CPU use 1 thread each)")
+    p.add_argument("--device", default=None,
+                   help="cuda / cpu (runtime key, not in config_hash; recorded per file). "
+                        "Keep each variant on one device.")
     p.add_argument("--no-summary", action="store_true")
     a = p.parse_args(argv)
     cfg = load_config()
+    if a.device:
+        cfg["eegnet"]["device"] = a.device
     cache_dir = resolve_cache_dir(a.cache_dir, cfg)
     out, hdir = Path(a.out), Path(a.history_dir)
     subjects = C.parse_subjects(a.subjects)
