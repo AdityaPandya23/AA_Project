@@ -303,6 +303,19 @@ machine. **No smaller budget is needed.** There is even room to raise `pop_size`
 The CLIs accept `17`, `sub-17`, `17..22`, `sub-17..sub-22` and `17-22`, and
 always write the contract's 2-digit label.
 
+## R07-11. `run_eegnet.py --device` changes `config_hash` (§k9) — *found in P4*
+
+`main()` sets `cfg["eegnet"]["device"] = a.device` and then records
+`config_hash(cfg)`. `config_hash` drops only `paths`, so `--device cuda` gives
+`3b7bc9400a` instead of `08e124167b`. That contradicts §k9 (device not in the
+hash). Without the flag the device is still CUDA when available, and the hash is
+correct. `--max-epochs` changes the hash too, but that is documented and intended.
+
+*Now:* don't pass `--device` for runs that are analysed. All committed P4 files
+have `08e124167b`. *Proposal (after P4, since it changes frozen code):* compute
+`config_hash` before applying `--device`, or drop `eegnet.device` and
+`eegnet.seed` inside `config_hash`.
+
 ## Requests for R01
 
 None left. PR #6 covered the method names and the side files. `cv.py` and
