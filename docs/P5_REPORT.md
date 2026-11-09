@@ -10,7 +10,7 @@ RTX 3050 6 GB, `AA_HOST=R07`), because R01 and R02 are offline.
 |---|---|---|
 | 1 | Position-only control (cross-session, with and without sub-01) | done |
 | 2 | Random-chromosome control at matched cost | done |
-| 3 | "Within 1 SD" chooser re-examination (§k12) | pending |
+| 3 | "Within 1 SD" chooser re-examination (§k12) | done |
 | 4 | Random-vs-block inflation (GA, EEGNet); viewing-period GA | pending |
 | 5 | Training accuracy; EEGNet early-stopping diagnostic | pending |
 
@@ -240,3 +240,82 @@ AA_HOST=R07 python -m experiments.random_control --n-draws 50 --n-jobs 8 --out r
 Outputs: `results/p5/random_control/{ga_nsga,ga_single}/*.json` (per fold: GA bits
 and BA, the 50 random bits and BAs, percentile), `fold_level.csv`,
 `subject_level.csv`, `summary.json` (every number in this section) and `summary.md`.
+
+## 3. "Within 1 SD" chooser re-examination (CONTRACTS §k12)
+
+**Exploratory (ANALYSIS_PLAN §5): this never replaces the stored `ga_nsga` results.
+CONTRACTS §g is unchanged and `ga_nsga` was not re-run.**
+
+**Question:** the contract picks the cheapest Pareto entry whose inner BA is within
+1 SD of the best (`b*`). With 3 small inner folds the SD is large, so the rule may
+pick chromosomes that are too small (CONTRACT_ISSUES #11). Would another rule do
+better?
+
+**Method** (`experiments/pareto_thresholds.py`, ported from R07's pre-plan WIP and
+extended). The rules are applied to the **stored** per-fold `ga_nsga` fronts
+(`results/pareto/`), with no new search:
+
+| Rule | Picks |
+|---|---|
+| `0sd` | best inner BA (`b*`; ties → cheapest) |
+| `0.5sd`, `1sd`, `2sd` | cheapest entry with inner BA ≥ `b*` − k·SD (`1sd` = contract rule) |
+| `se` | cheapest entry within one standard error (SD/√3) |
+| `knee` | knee of the 2-D (cost, inner BA) front: largest distance above the chord from the cheapest to the most accurate entry, axes scaled to [0, 1] (fewer than 3 points → `b*`) |
+| `mincost` | cheapest entry of the front |
+
+Each rule's chromosome is re-scored once on the outer test fold with the same
+FBCSP+LDA (`fbcsp.evaluate` on the full outer training set). `1sd` reproduces every
+stored `chosen_bits` (asserted), and every row that overlaps R07's pre-plan run of
+this script is identical. Stability is Kuncheva / Jaccard over all (fold, seed)
+pairs per recording.
+
+| Rule | Block BA (n = 22) | Cost | Channels | Inner BA | Inner − outer | Kuncheva / Jaccard | − `fbcsp_all` (p) | − `1sd` (p) | Cross-session BA (n = 20) | − `fbcsp_all` (p) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `0sd` (best inner) | **0.351** | 0.415 | 3.4 | 0.545 | +0.194 | 0.066 / 0.31 | −0.002 (0.87) | +0.005 (0.25) | 0.338 | +0.001 (0.87) |
+| `0.5sd` | 0.348 | 0.345 | 3.0 | 0.533 | +0.185 | 0.076 / 0.26 | −0.004 (0.63) | +0.003 (0.15) | 0.336 | −0.001 (0.86) |
+| `se` | 0.344 | 0.334 | 2.9 | 0.529 | +0.186 | 0.074 / 0.25 | −0.009 (0.29) | −0.002 (0.66) | 0.338 | +0.001 (0.72) |
+| **`1sd` (contract)** | 0.345 | 0.295 | 2.6 | 0.512 | +0.167 | 0.078 / 0.23 | −0.007 (0.44) | – | 0.340 | +0.003 (0.60) |
+| `knee` | 0.347 | 0.282 | 2.5 | 0.510 | +0.162 | 0.070 / 0.22 | −0.005 (0.61) | +0.002 (0.87) | 0.334 | −0.003 (0.90) |
+| `2sd` | 0.338 | 0.247 | 2.3 | 0.486 | +0.147 | 0.077 / 0.20 | −0.014 (0.28) | −0.007 (0.14) | 0.341 | +0.004 (0.55) |
+| `mincost` | 0.343 | **0.214** | 2.0 | 0.463 | +0.119 | 0.074 / 0.18 | −0.009 (0.50) | −0.002 (0.73) | **0.342** | +0.005 (0.65) |
+| *`ga_single` (stored)* | 0.353 | 0.476 | 3.8 | 0.568 | +0.215 | 0.084 / 0.37 | +0.001 (0.80) | +0.008 (0.26) | 0.328 | −0.009 (0.35) |
+
+`fbcsp_all`: 0.353 block, 0.337 cross-session. Two-sided Wilcoxon over subjects
+(seeds, then sessions averaged).
+
+* **No rule beats `fbcsp_all`.** All rules lie within −0.014 to +0.005 BA of it,
+  with no p below 0.27. No rule differs significantly from the contract rule
+  either (all p ≥ 0.14).
+* **There is a weak cost-accuracy slope on block and none on cross-session.** On
+  block, looser rules (cheaper chromosomes) lose a little: from 0.351 (`0sd`,
+  cost 0.42) to 0.338 (`2sd`, cost 0.25). On cross-session the order reverses
+  (`mincost` is highest). The full range is 0.013 BA, below the seed-to-seed SD of
+  a recording (about 0.035), and consistent with BA being flat across subset size
+  (§2).
+* **Inner-CV optimism falls with cost** (+0.19 for `0sd` to +0.12 for `mincost`):
+  picking the best inner score from about 600 evaluations selects lucky
+  chromosomes (winner's curse), and less selection pressure on accuracy means less
+  luck. Outer BA does not change with it.
+* **Stability is near chance for every rule** (Kuncheva 0.066–0.078). No chooser
+  makes the selection reproducible, as expected given §2.
+
+**Picking a rule by these numbers would be selection on the test set.** The outer
+test folds were used to score every rule, so choosing the rule with the best outer
+BA (e.g. `0sd` on block, `mincost` on cross-session) would leak test information
+into the method and bias that rule's score upward. The rules would have to be
+compared on held-out data. Here the differences are smaller than the noise anyway,
+so there is nothing to choose.
+
+**Conclusion:** the §k12 rule is not the problem. No chooser recovers accuracy that
+the search did not find; the fronts contain no reliably better chromosome. **No
+change to CONTRACTS §g is proposed.**
+
+Reproduce (about 3 min on R07):
+
+```
+python -m experiments.pareto_thresholds --results-dir results --out results/p5/chooser_rules
+```
+
+Outputs: `results/p5/chooser_rules/chooser_rules{,_cross_session}.csv` (this
+table), `pareto_thresholds_folds*.csv` (one row per fold and rule) and
+`pareto_thresholds_summary*.{csv,md}`.
