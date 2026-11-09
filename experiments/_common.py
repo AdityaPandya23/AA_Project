@@ -53,13 +53,13 @@ def recordings(protocol: str, subjects: list[str], sessions: list[str], kind: st
                cfg: dict[str, Any], cache_dir: Path) -> list[tuple[str, str]]:
     """``(subject, session_label)`` units of a protocol, skipping missing caches.
 
-    ``block``: one per existing ``sub/ses`` file. ``cross_session``:
-    ``(sub, "01to02")`` for subjects with both sessions.
+    ``block`` and ``random``: one per existing ``sub/ses`` file.
+    ``cross_session``: ``(sub, "01to02")`` for subjects with both sessions.
     """
     from src import cache
     have = set(cache.list_cached(kind, cfg, cache_dir))
     units = []
-    if protocol == "block":
+    if protocol in ("block", "random"):
         for s in subjects:
             for ses in sessions:
                 if (s, ses) in have:
@@ -79,14 +79,22 @@ def recordings(protocol: str, subjects: list[str], sessions: list[str], kind: st
 
 
 def load_unit(kind: str, subject: str, session: str, cfg: dict[str, Any],
-              cache_dir: Path) -> tuple[dict[str, Any], list[Split]]:
-    """Load data and outer splits for one unit (``session`` may be ``"01to02"``)."""
+              cache_dir: Path, protocol: str = "block",
+              seed: int = 0) -> tuple[dict[str, Any], list[Split]]:
+    """Load data and outer splits for one unit (``session`` may be ``"01to02"``).
+
+    ``protocol="random"``: ``cv.random_splits(y, evaluation.random_n_splits, seed)``,
+    i.e. the seed is the split seed (CONTRACT_ISSUES.md R01 #8), as in
+    ``experiments/sanity.py``. Used only for the block-vs-random drift check.
+    """
     if session == "01to02":
         d1 = load(kind, subject, "01", cfg, cache_dir)
         d2 = load(kind, subject, "02", cfg, cache_dir)
         d = cv.concat_sessions(d1, d2, kind)
         return d, cv.cross_session(len(d1["y"]), len(d2["y"]))
     d = load(kind, subject, session, cfg, cache_dir)
+    if protocol == "random":
+        return d, cv.random_splits(d["y"], int(cfg["evaluation"]["random_n_splits"]), int(seed))
     return d, cv.block_splits(d["block"])
 
 

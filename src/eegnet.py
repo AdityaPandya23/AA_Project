@@ -60,8 +60,26 @@ def build_model(n_chans: int, n_times: int, ecfg: dict[str, Any]):
                           final_layer_with_constraint=True)
 
 
-def _fit_one(Xtr, ytr, Xva, yva, ecfg, device, seed):
-    """Train with early stopping on (Xva, yva). Returns ``(model, best_epoch, n_epochs)``."""
+def _ba_t(y_true, logits) -> float:
+    """Balanced accuracy from torch labels and logits."""
+    yt = y_true.cpu().numpy()
+    yp = logits.argmax(1).cpu().numpy()
+    return float(np.mean([np.mean(yp[yt == c] == c) for c in np.unique(yt)]))
+
+
+def _fit_one(Xtr, ytr, Xva, yva, ecfg, device, seed, history: list | None = None):
+    """Train with early stopping on (Xva, yva). Returns ``(model, best_epoch, n_epochs)``.
+
+    Options, all off by default (the frozen §k2 recipe):
+
+    * ``ecfg["restore_best"] = False`` keeps the final weights instead of the
+      lowest-validation-loss epoch. With ``early_stopping_patience >= max_epochs``
+      this is plain fixed-length training. It changes ``config_hash``.
+    * ``history`` (a list) receives one dict per epoch: ``train_loss`` (mean
+      mini-batch loss), ``train_ba`` and ``val_ba`` (eval mode), ``val_loss``.
+      Logging runs only eval-mode forward passes and consumes no random numbers,
+      so it does not change the result.
+    """
     import torch
 
     _seed_everything(seed)
@@ -81,6 +99,7 @@ def _fit_one(Xtr, ytr, Xva, yva, ecfg, device, seed):
     for epoch in range(int(ecfg["max_epochs"])):
         model.train()
         perm = torch.randperm(len(Xtr_t), generator=gen).to(device)
+        batch_losses = []
         for i in range(0, len(perm), bs):
             idx = perm[i:i + bs]
             if len(idx) < 2:   # BatchNorm needs > 1 sample
@@ -89,15 +108,23 @@ def _fit_one(Xtr, ytr, Xva, yva, ecfg, device, seed):
             loss = loss_fn(model(Xtr_t[idx]), ytr_t[idx])
             loss.backward()
             opt.step()
+            if history is not None:
+                batch_losses.append(float(loss.detach()))
         model.eval()
         with torch.no_grad():
-            vloss = float(loss_fn(model(Xva_t), yva_t))
+            vlogits = model(Xva_t)
+            vloss = float(loss_fn(vlogits, yva_t))
+            if history is not None:
+                history.append({"epoch": epoch, "train_loss": float(np.mean(batch_losses)),
+                                "train_ba": _ba_t(ytr_t, model(Xtr_t)),
+                                "val_loss": vloss, "val_ba": _ba_t(yva_t, vlogits)})
         if vloss < best_loss - 1e-6:
             best_loss, best_epoch = vloss, epoch
             best_state = copy.deepcopy(model.state_dict())
         elif epoch - best_epoch >= patience:
             break
-    if best_state is not None:  # None only if every val loss was NaN
+    # None only if every val loss was NaN
+    if best_state is not None and ecfg.get("restore_best", True):
         model.load_state_dict(best_state)
     model.eval()
     return model, best_epoch, epoch + 1
@@ -190,7 +217,9 @@ def evaluate_eegnet(X: np.ndarray, y: np.ndarray, splits: Sequence[Split],
         with its ``test_idx``, like ``fbcsp.evaluate``), ``infer_time_ms`` =
         batch predict of the test fold / n_test (R01's definition),
         ``infer_time_ms_batch1`` (batch size 1), ``best_epoch``, ``n_epochs``,
-        ``device`` and ``seed``.
+        ``device`` and ``seed``. P5 diagnostics: ``train_ba`` / ``val_ba`` (final
+        model on the fit / validation part of each training fold) and ``history``
+        (per-epoch curves when ``cfg["eegnet"]["log_history"]`` is true, else ``None``).
     """
     os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
     import torch
@@ -210,6 +239,7 @@ def evaluate_eegnet(X: np.ndarray, y: np.ndarray, splits: Sequence[Split],
 
     per_fold, train_time, latencies, best_epochs, n_epochs = [], 0.0, [], [], []
     preds, latencies_b1 = [], []
+    histories, train_bas, val_bas = [], [], []
     n_params = None
     for k, (tr, te) in enumerate(splits):
         tr = np.asarray(tr, dtype=np.int64)
@@ -225,11 +255,15 @@ def evaluate_eegnet(X: np.ndarray, y: np.ndarray, splits: Sequence[Split],
         def norm(a):
             return ((a - mu) / sd).astype(np.float32)
 
+        hist = [] if ecfg.get("log_history") else None
         model, best_ep, n_ep = _fit_one(norm(X[fit_idx]), y[fit_idx], norm(X[val_idx]),
-                                        y[val_idx], ecfg, device, seed * 1000 + k)
+                                        y[val_idx], ecfg, device, seed * 1000 + k, hist)
         if device.type == "cuda":
             torch.cuda.synchronize()
         train_time += time.perf_counter() - t0
+        histories.append(hist)
+        train_bas.append(float(balanced_accuracy_score(y[fit_idx], _predict(model, norm(X[fit_idx]), device))))
+        val_bas.append(float(balanced_accuracy_score(y[val_idx], _predict(model, norm(X[val_idx]), device))))
 
         Xte = norm(X[te])
         yp, lat = _batch_latency_ms(model, Xte, device)
@@ -250,4 +284,4 @@ def evaluate_eegnet(X: np.ndarray, y: np.ndarray, splits: Sequence[Split],
             "infer_time_ms_batch1": float(np.mean(latencies_b1)), "y_pred": preds,
             "n_params": n_params,
             "best_epoch": best_epochs, "n_epochs": n_epochs, "device": str(device),
-            "seed": seed}
+            "seed": seed, "train_ba": train_bas, "val_ba": val_bas, "history": histories}
