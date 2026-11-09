@@ -149,9 +149,11 @@ def drift(results: Path, p5: Path, out: Path) -> Path | None:
         rnd = A.load_results(d)
         ref = A.load_results([results, results / "baseline_all", results / "sanity"])
     methods = [m for m in ("fbcsp_all", "ga_nsga", "ga_single", "eegnet_32ch", "eegnet_8ch")]
+    rnd, ref = rnd[rnd.seed.isin([0, 1, 2])], ref[ref.seed.isin([0, 1, 2])]  # like for like (p5_drift)
     blk = A.subject_level(ref, "block")
     rr = A.subject_level(pd.concat([rnd, ref[ref.protocol == "random"]]), "random")
-    fig, (ax,) = _fig(8.0, 4.2)
+    fig, (ax,) = _fig(8.0, 4.4)
+    top = max(max(blk[m].max(), rr[m].max()) for m in methods if m in rr and m in blk)
     for i, m in enumerate(methods):
         if m not in rr or m not in blk:
             continue
@@ -161,9 +163,9 @@ def drift(results: Path, p5: Path, out: Path) -> Path | None:
         ax.scatter(np.full(len(b), i - 0.15), b, s=22, color=method_color(m), zorder=3)
         ax.scatter(np.full(len(r), i + 0.15), r, s=22, color=method_color(m), marker="D",
                    edgecolor=TEXT_2, linewidth=0.6, zorder=3)
-        ax.annotate(f"{(r - b).mean():+.3f}", (i, max(b.max(), r.max()) + 0.006), ha="center",
-                    fontsize=8, color=TEXT)
+        ax.annotate(f"{(r - b).mean():+.3f}", (i, top + 0.012), ha="center", fontsize=8, color=TEXT)
     A._chance_line(ax)
+    ax.set_ylim(None, top + 0.022)
     ax.set_xticks(range(len(methods)))
     ax.set_xticklabels([method_label(m) for m in methods], fontsize=8)
     ax.set_ylabel("Subject BA: block (left) vs random 5-fold (right)")

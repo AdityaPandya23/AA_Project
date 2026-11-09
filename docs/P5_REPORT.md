@@ -1,22 +1,39 @@
 # P5 report: robustness checks and controls
 
-R07, started 2026-11-09. **Everything here is exploratory relative to
-`docs/ANALYSIS_PLAN.md`.** Nothing in this report changes the pre-registered results
-in `docs/RESULTS.md`. Code: `main` @ `a267a66` (tag `p4-results` + PR #16) plus the
-commits on branch `p5`. Config `08e124167b`. All P5 runs are on R07 (i5-13450HX,
-RTX 3050 6 GB, `AA_HOST=R07`), because R01 and R02 are offline.
+R07, 2026-11-09/10. **Everything in this report is exploratory relative to
+`docs/ANALYSIS_PLAN.md`.** None of it changes the pre-registered results in
+`docs/RESULTS.md` (primary hypothesis not supported; secondary family all
+p_holm = 1.000). Code: `main` @ `a267a66` (tag `p4-results` + PR #16) plus the
+commits on branch `p5`. P3/P4 design config `08e124167b`; the EEGNet recipe
+variants in §5 have their own hashes. All P5 runs are on R07 (i5-13450HX,
+RTX 3050 6 GB, `AA_HOST=R07`), because R01 and R02 are offline. Every number comes
+from a committed script (the reproduce block at the end of each section).
 
-| § | Check | Status |
-|---|---|---|
-| 1 | Position-only control (cross-session, with and without sub-01) | done |
-| 2 | Random-chromosome control at matched cost | done |
-| 3 | "Within 1 SD" chooser re-examination (§k12) | done |
-| 4 | Random-vs-block inflation (GA, EEGNet); viewing-period GA | done |
-| 5 | Training accuracy; EEGNet early-stopping diagnostic | pending |
+## Overview
+
+| § | Check (all exploratory) | Main result | Figure |
+|---|---|---|---|
+| 1 | Position-only control, cross-session (± sub-01) | Position predicts class (0.397, p = 0.001) because 30-trial block orders are reused across sessions for 10/20 subjects. The methods do not follow it (κ ≈ 0, no gain on shared-block subjects). sub-01 cannot be resolved. | `position_control_cross_session.png` |
+| 2 | Random chromosomes at matched cost | GA − random +0.004 / +0.007 (n.s.), percentile 0.51 / 0.52: **the search adds nothing beyond the cost reduction** | `random_control.png` |
+| 3 | "Within 1 SD" chooser (§k12) | No rule beats `fbcsp_all` or the contract rule (all within −0.014 to +0.005 BA); test-set scores, not for choosing a rule | `chooser_rules_block.png` |
+| 4 | Random-vs-block; viewing period | No random-split inflation (−0.002 to −0.011, n.s.). Viewing is decodable (`fbcsp_all` 0.435), and there `ga_nsga` loses 0.025 to `fbcsp_all` (p = 0.004) | `random_vs_block.png` |
+| 5 | Training accuracy; EEGNet diagnostic | Training BA 0.999 / 0.751 / 0.576 (`fbcsp_all` / `ga_single` / `ga_nsga`) vs test about 0.35. EEGNet reaches 1.0 without early stopping, validation stays at chance; the recipe was not the bottleneck | `train_inner_test.png`, `eegnet_learning_curves.png` |
+
+Figures are in `results/figures/p5/` (`python -m reports.make_p5_figures`), drawn
+only from the committed outputs under `results/p5/`.
+
+**Taken together:** the imagery period carries very little transferable class
+information. Every model fits its training data and generalises to about chance +
+0.02. The GA's component selection is indistinguishable from a random subset of the
+same size, its chooser rule does not matter, and its cost reduction comes almost
+for free only because there is no accuracy to lose. Where a real signal exists (the
+viewing period), the stability-aware GA trades away a significant 0.025 BA for a
+67 % cost reduction. Neither trial-position confounds nor random-split leakage
+explain any of the results.
 
 ## 1. Position-only control
 
-**Question** (P2_REPORT §3, P2_REVIEW §7, DATA_NOTES §4): can the class be predicted
+**Exploratory.** **Question** (P2_REPORT §3, P2_REVIEW §7, DATA_NOTES §4): can the class be predicted
 from where a trial sits in the presentation sequence, without any EEG? If yes, a
 method could score above chance by picking up a position-locked signal (fatigue
 within a block, time since a pause, slow drift) instead of shape information. This
@@ -159,7 +176,7 @@ RESULTS.md S2 already does (Δ +0.003 → +0.006, both n.s.).
 
 Implications:
 
-1. **DATA_NOTES §4 should be extended:** block orders (not only whole sequences)
+1. **DATA_NOTES §4 is extended** (P5 addendum, added in this branch): block orders (not only whole sequences)
    are reused across sessions for 10 of 20 subjects, and sub-13 ses-01 repeats a
    block within the session. Any future analysis that can see within-block position
    (cross-session, cross-subject, or the `random` protocol) inherits this confound.
@@ -179,7 +196,7 @@ Outputs: `results/p5/position_control/{position_block30,position_seq120}/*.json`
 
 ## 2. Random-chromosome control at matched cost
 
-**Question** (P3_REPORT_R02 §3.2): does the GA's *search* find better components than
+**Exploratory.** **Question** (P3_REPORT_R02 §3.2): does the GA's *search* find better components than
 chance, or does it only deliver the cost reduction? If a random subset of the same
 size scores as well as the GA's chosen subset, the search adds nothing.
 
@@ -404,3 +421,129 @@ python -m reports.p5_drift --results results --out results/p5/drift
 Outputs: `results/p5/drift/{ga_nsga,ga_single,eegnet_32ch,eegnet_8ch}/*_random.json`,
 `results/p5/drift/{ga_nsga,ga_single}_view/*.json`, the Pareto side files in
 `results/p5/drift/pareto/`, and `summary.{json,md}`.
+
+## 5. Training accuracy and the EEGNet training diagnostic
+
+**Exploratory.** Nothing here replaces a P3/P4 file.
+
+### 5.1 Training vs inner-CV vs test BA (FBCSP-based methods)
+
+`reports/train_accuracy.py` refits FBCSP+LDA on every outer training fold with the
+committed `chosen_bits` (all 19 genes for `fbcsp_all`). It scores the **training**
+trials (resubstitution) and the test fold, and every re-scored test BA must equal
+the stored one. Inner-CV BA is the GA fitness of the chosen chromosome, from the
+stored fronts. For `fbcsp_all` it is the all-on chromosome on the same 3-fold inner
+splits (seed 0). Subject level, mean ± SD:
+
+| Method | Protocol | Training BA | Inner-CV BA | Test BA | Training − test | Inner − test | Features |
+|---|---|---|---|---|---|---|---|
+| `fbcsp_all` | block (n = 22) | **0.999 ± 0.001** | 0.342 | 0.353 ± 0.044 | +0.647 | −0.010 | 168 |
+| `ga_single` | block | 0.751 ± 0.048 | 0.568 | 0.353 ± 0.029 | +0.398 | +0.215 | 38 |
+| `ga_nsga` | block | 0.576 ± 0.022 | 0.512 | 0.345 ± 0.025 | +0.231 | +0.167 | 13 |
+| `fbcsp_all` | cross-session (n = 20) | 0.997 ± 0.005 | 0.361 | 0.337 ± 0.039 | +0.660 | +0.024 | 168 |
+| `ga_single` | cross-session | 0.753 ± 0.078 | 0.552 | 0.328 ± 0.027 | +0.425 | +0.224 | 47 |
+| `ga_nsga` | cross-session | 0.547 ± 0.042 | 0.491 | 0.340 ± 0.027 | +0.207 | +0.151 | 13 |
+
+* **Every model fits its training data far better than it generalises.**
+  `fbcsp_all` (168 features, about 90 training trials) memorises them (0.999). The
+  GA models are smaller and fit less (0.75 / 0.58), but all three land at the same
+  test BA (about 0.35, chance + 0.02).
+* **The inner-CV optimism is caused by the selection, not by the classifier.**
+  Without selection, the inner CV of `fbcsp_all` is an honest estimate of its test BA
+  (0.342 vs 0.353). The GA reports the *best* of about 600 noisy inner-CV estimates,
+  so its chosen chromosome's inner BA is inflated by +0.17 / +0.21 (winner's curse).
+  More selection pressure on accuracy (`ga_single`) means more inflation.
+
+### 5.2 EEGNet training diagnostic
+
+`experiments/eegnet_diag.py` re-runs EEGNet on the same outer splits with per-epoch
+logging (train and validation loss and BA), seed 0, all 22 subjects, block and
+cross-session, 32 and 8 channels (496 runs). Variants:
+
+| Variant | Recipe | Device (32ch / 8ch) | Config hash |
+|---|---|---|---|
+| `logged` | P4 recipe (§k2) + logging | GPU / GPU | `08e124167b` (logging is a runtime key) |
+| `val03` | validation fraction 0.3 instead of 0.2, early stopping as P4 | GPU / GPU | `dc92b22397` |
+| `fixed100` | 100 epochs, no early stopping, final weights | CPU / GPU | `cf0e10b882` |
+| `fixed300` | 300 epochs, no early stopping, final weights | GPU / CPU | `b13fe340cf` |
+
+**`logged` reproduces P4 exactly:** all 124 seed-0 files have identical predictions,
+so the logging changes nothing. To finish in about 2 h instead of about 4.5 h, two
+variants ran partly on the CPU (10 single-thread workers next to the GPU). Each
+variant × channel set ran entirely on one device, recorded per file. CPU and GPU
+arithmetic differ slightly, so for those runs the comparison with P4 also contains
+a device change, which acts like a different random seed.
+
+Subject-level test BA (seed 0) vs the P4 seed-0 runs (Wilcoxon); training and
+validation BA of the final model (fold mean); share of folds whose validation loss
+was lowest after the first epoch (`best_epoch` 0):
+
+| Method | Protocol | Test BA | − P4 (p) | Training BA | Validation BA | `best_epoch` 0 | Epochs (median) |
+|---|---|---|---|---|---|---|---|
+| `eegnet_32ch_logged` (= P4) | block | 0.350 | 0 | 0.639 | 0.364 | 39 % | 57 |
+| `eegnet_32ch_val03` | block | 0.339 | −0.011 (0.08) | 0.650 | 0.360 | 40 % | 57 |
+| `eegnet_32ch_fixed100` | block | 0.337 | −0.013 (0.14) | 0.988 | 0.346 | 35 % | 100 |
+| `eegnet_32ch_fixed300` | block | **0.327** | **−0.022 (0.012)** | 1.000 | 0.335 | 36 % | 300 |
+| `eegnet_8ch_logged` (= P4) | block | 0.350 | 0 | 0.648 | 0.373 | 37 % | 63 |
+| `eegnet_8ch_val03` | block | 0.350 | +0.000 (0.92) | 0.659 | 0.373 | 31 % | 65 |
+| `eegnet_8ch_fixed100` | block | 0.345 | −0.004 (0.57) | 0.945 | 0.339 | 35 % | 100 |
+| `eegnet_8ch_fixed300` | block | 0.337 | −0.012 (0.24) | 0.999 | 0.355 | 28 % | 300 |
+
+Cross-session (n = 20): `logged` 0.330 (32ch) / 0.330 (8ch). The variants range from
+0.308 to 0.343, and none differs from P4 at p < 0.05 (32ch `fixed100` −0.022,
+p = 0.052). Full table: `results/p5/eegnet_diag/variants.csv`.
+
+* **EEGNet's training BA is about 0.64 with P4's early stopping, and goes to 1.0
+  without it.** Validation BA stays at chance for all 300 epochs
+  (`results/figures/p5/eegnet_learning_curves.png`): the network memorises the
+  training trials and learns nothing that transfers.
+* **The early-stopping recipe was not what held EEGNet back.** Training longer
+  without early stopping lowers test BA a little (32ch `fixed300` −0.022,
+  p = 0.012). A larger validation set (`val03`) changes nothing. With the
+  validation curve flat at chance, "the lowest validation loss is at epoch 0"
+  (28–40 % of folds) is simply what noise around a flat curve looks like. It is not
+  a fault of the recipe.
+* So EEGNet's near-chance accuracy in P4 reflects the data, the same as for the
+  FBCSP methods (§5.1): there is too little transferable class information in the
+  imagery period for any of these models.
+
+Reproduce (about 2 h on R07 with the GPU plus 10 CPU workers; full per-epoch
+histories go to the git-ignored `results/raw/p5_eegnet_history/`):
+
+```
+python -m reports.train_accuracy --results results --out results/p5/train_accuracy
+AA_HOST=R07 python -m experiments.eegnet_diag --out results/p5/eegnet_diag --n-jobs 2
+# optional split used here: --variants fixed100 --channels 32 --device cpu --n-jobs 5 (CUDA_VISIBLE_DEVICES=-1), etc.
+```
+
+Outputs: `results/p5/train_accuracy/{fold_level,summary}.csv`;
+`results/p5/eegnet_diag/{method}/*.json` (contract records plus per-fold
+`train_ba`, `val_ba`, `best_epoch`, `n_epochs`), `variants.csv`, `curves.csv` (mean
+block learning curves per variant and epoch) and `summary.{json,md}`.
+
+## Reproduce all of P5
+
+From a checkout of this branch on one machine with the caches built (see README),
+`AA_HOST=R07` (or your own label). Wall times are measured on R07.
+
+```
+python -m experiments.position_control --subjects 01..22 --out results/p5/position_control     # ~2 min
+python -m experiments.random_control --n-draws 50 --n-jobs 8 --out results/p5/random_control   # ~1 min
+python -m experiments.pareto_thresholds --results-dir results --out results/p5/chooser_rules    # ~3 min
+for m in ga_nsga ga_single; do                                                                # ~15 min
+  python -m experiments.run_ga --method $m --subjects 01..22 --protocol random --results-dir results/p5/drift
+  python -m experiments.run_ga --method $m --subjects 01..22 --cache-kind view --results-dir results/p5/drift
+done
+python -m experiments.run_eegnet --channels 32 8 --subjects 01..22 --protocol random --results-dir results/p5/drift  # ~1.5 h GPU
+python -m experiments.pareto_thresholds --results-dir results/p5/drift --out results/p5/chooser_rules --view --protocol block --no-compare
+python -m reports.p5_drift --results results --out results/p5/drift
+python -m reports.train_accuracy --results results --out results/p5/train_accuracy             # ~2 min
+python -m experiments.eegnet_diag --out results/p5/eegnet_diag --n-jobs 2                        # ~4.5 h GPU only (~2 h with CPU workers, §5.2)
+python -m reports.make_p5_figures --results results --out results/figures/p5
+```
+
+Code added on this branch: `experiments/{position_control,random_control,eegnet_diag}.py`,
+`experiments/pareto_thresholds.py` (ported), the `--protocol random` / `--cache-kind view`
+runner options (ported, block and cross-session outputs unchanged), optional history
+logging and `restore_best` in `src/eegnet.py` (off by default), and
+`reports/{train_accuracy,p5_drift,make_p5_figures}.py`. All have tests.
