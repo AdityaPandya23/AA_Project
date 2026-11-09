@@ -8,7 +8,8 @@ anyone edits `CONTRACTS.md`.
 > **Status:** every item below was settled at P1.5 and is recorded in
 > `docs/CONTRACTS.md` §k (binding from tag `p1-integrated`). The only item
 > still open is #11 / k12 (the 1-SD rule), which is revisited after P3. The
-> text below is kept as the rationale.
+> text below is kept as the rationale. Found later and resolved in P5
+> (`p5-fixes`, after tag `p4-results`): R07-11 and R07-12.
 
 ### Open decisions (summary, 2026-11-08; resolved, see CONTRACTS §k)
 
@@ -303,7 +304,15 @@ machine. **No smaller budget is needed.** There is even room to raise `pop_size`
 The CLIs accept `17`, `sub-17`, `17..22`, `sub-17..sub-22` and `17-22`, and
 always write the contract's 2-digit label.
 
-## R07-11. `run_eegnet.py --device` changes `config_hash` (§k9) — *found in P4*
+## R07-11. `run_eegnet.py --device` changes `config_hash` (§k9) — *found in P4; resolved in P5 (`p5-fixes`)*
+
+**Resolved:** `src.config.config_hash` now drops the runtime keys `eegnet.seed`
+and `eegnet.device` (`RUNTIME_KEYS`) as well as `paths`, as §k9 states. The hash
+of `config.yaml` is unchanged (`08e124167b`, pinned by
+`tests/test_config.py::test_hash_of_frozen_design`), so every existing result
+keeps its hash. `--device` no longer changes the hash, and `--max-epochs` still
+does (`tests/test_eegnet.py::test_run_eegnet_device_flag_keeps_config_hash`).
+The original report follows.
 
 `main()` sets `cfg["eegnet"]["device"] = a.device` and then records
 `config_hash(cfg)`. `config_hash` drops only `paths`, so `--device cuda` gives
@@ -315,6 +324,22 @@ correct. `--max-epochs` changes the hash too, but that is documented and intende
 have `08e124167b`. *Proposal (after P4, since it changes frozen code):* compute
 `config_hash` before applying `--device`, or drop `eegnet.device` and
 `eegnet.seed` inside `config_hash`.
+
+## R07-12. `load_results("results")` raises on non-result JSONs — *found in P3; resolved in P5 (`p5-fixes`)*
+
+Reported in P3_REPORT_R01 §3.3, P3_REPORT_R02 §3.3 and RESULTS.md: `load_results`
+globs `{dir}/*/*.json`, so on the `results/` root it read
+`results/sanity/sanity_summary.json` and failed validation. The P3 analysis
+therefore loaded a scratch copy of the method folders.
+
+**Resolved:** `load_results` now skips `*_summary.json` and anything directly in
+`pareto/` (run_ga side files) or `raw/` (checkpoints)
+(`tests/test_analysis.py::test_load_results_skips_non_result_files`).
+`load_results("results")` now works. Nested result folders still have to be passed
+explicitly: `load_results(["results", "results/baseline_all", "results/sanity"])`
+loads all 1058 committed result files, all with `08e124167b`.
+`reports/p3_numbers.py` keeps its scratch-copy step, so its output stays
+byte-identical.
 
 ## Requests for R01
 

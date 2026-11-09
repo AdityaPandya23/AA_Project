@@ -26,6 +26,23 @@ def test_hash_ignores_paths_but_not_design(monkeypatch, tmp_path):
     assert config_hash(cfg) != h0
 
 
+def test_hash_of_frozen_design():
+    # Every P2-P4 result was produced with this hash; a design change must be deliberate.
+    assert config_hash(load_config()) == "08e124167b"
+
+
+def test_hash_ignores_runtime_eegnet_keys():
+    # CONTRACTS §k9 / CONTRACT_ISSUES R07-11: per-run seed and device are not design.
+    cfg = load_config()
+    h0 = config_hash(cfg)
+    cfg["eegnet"]["device"] = "cuda"
+    cfg["eegnet"]["seed"] = 2
+    assert config_hash(cfg) == h0
+    assert cfg["eegnet"]["device"] == "cuda"  # the caller's config is not modified
+    cfg["eegnet"]["max_epochs"] = 2
+    assert config_hash(cfg) != h0
+
+
 def test_fixed_design_values():
     cfg = load_config()
     assert cfg["classes"] == {"circle": 0, "square": 1, "pentagram": 2}
