@@ -1,0 +1,9 @@
+§,Check,Result
+1,Position-only control (cross-session),"Position predicts class: 0.397 (p < 0.001); without sub-01 0.390. Shared-block subjects 0.449 vs 0.345; methods unchanged (FBCSP all 0.337 vs 0.337, p = 0.79)"
+2,Random chromosomes at matched cost: GA-NSGA (proposed),GA 0.345 vs random 0.341: Δ +0.004 (p = 0.42); mean percentile 0.51
+2,Random chromosomes at matched cost: GA single-obj.,GA 0.353 vs random 0.347: Δ +0.007 (p = 0.20); mean percentile 0.52
+3,"Chooser rules (§k12), block",Outer BA 0.338–0.351 across 7 rules; vs FBCSP all -0.014 to -0.002 (all p ≥ 0.28)
+4,Random 5-fold vs block,"FBCSP all -0.004, GA-NSGA (proposed) -0.006, GA single-obj. -0.011, EEGNet (32 ch) -0.002, EEGNet (8 ch) -0.005 (all p ≥ 0.09)"
+4,Viewing period: GA-NSGA vs FBCSP all,0.410 vs 0.435: Δ -0.025 (p = 0.004)
+5,Training vs test BA (block),FBCSP all 0.999 vs 0.353; GA single-obj. 0.751 vs 0.353; GA-NSGA (proposed) 0.576 vs 0.345
+5,"EEGNet training diagnostic (block, seed 0)",Training BA 0.64 (P4 recipe) → 1.00 (300 epochs); test 0.350 → 0.327 (p = 0.012)
