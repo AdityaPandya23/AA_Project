@@ -122,6 +122,9 @@ def _attach_side_pareto(path: Path, folds: list[dict[str, Any]]) -> None:
 
 
 # ---------------------------------------------------------------- loading
+_NON_RESULT_DIRS = frozenset({"pareto", "raw"})
+
+
 def load_results(results_dir: str | os.PathLike) -> pd.DataFrame:
     """Load every ``{results_dir}/*/*.json`` into one DataFrame.
 
@@ -133,11 +136,19 @@ def load_results(results_dir: str | os.PathLike) -> pd.DataFrame:
 
     ``results_dir`` may also be a list of directories, which are concatenated.
     Extra columns: ``n_folds`` and ``synthetic``.
+
+    Not result records, so skipped: ``*_summary.json`` (e.g.
+    ``results/sanity/sanity_summary.json``) and the ``pareto/`` (run_ga side files)
+    and ``raw/`` (checkpoints) folders. So ``load_results("results")`` reads the
+    method folders directly under ``results/``. Nested folders such as
+    ``results/baseline_all/fbcsp_all/`` must still be passed explicitly.
     """
     dirs = [results_dir] if isinstance(results_dir, (str, os.PathLike)) else list(results_dir)
     rows = []
     for d in dirs:
         for p in sorted(Path(d).glob("*/*.json")):
+            if p.parent.name in _NON_RESULT_DIRS or p.name.endswith("_summary.json"):
+                continue
             with open(p, encoding="utf-8") as f:
                 rec = json.load(f)
             try:

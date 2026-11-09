@@ -61,6 +61,22 @@ def test_load_results_warns_on_mixed_config_hash(tmp_path, fake_dir):
         A.load_results(tmp_path)
 
 
+def test_load_results_skips_non_result_files(fake_dir, df, tmp_path):
+    # results/ root layout: sanity summary, run_ga side files and checkpoints next to methods.
+    import shutil
+    shutil.copytree(fake_dir, tmp_path, dirs_exist_ok=True)
+    (tmp_path / "sanity").mkdir()
+    (tmp_path / "sanity" / "sanity_summary.json").write_text(json.dumps({"n": 1}))
+    for d in ("pareto", "raw"):
+        (tmp_path / d).mkdir()
+        (tmp_path / d / "sub-01_ses-01_seed-0.json").write_text(json.dumps({"folds": []}))
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        d = A.load_results(tmp_path)
+    assert len(d) == len(df)
+    assert not d["path"].str.contains(r"[\\/](?:pareto|raw|sanity)[\\/]").any()
+
+
 def test_load_results_list_of_dirs(fake_dir, df):
     assert len(A.load_results([fake_dir, fake_dir])) == 2 * len(df)
 

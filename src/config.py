@@ -61,9 +61,24 @@ def load_config(path: str | os.PathLike | None = None) -> dict[str, Any]:
     return cfg
 
 
+#: Per-run settings that are not part of the design (CONTRACTS §k9): set on a copy of
+#: the config by ``experiments/run_eegnet.py`` and never in ``config.yaml``.
+RUNTIME_KEYS: dict[str, tuple[str, ...]] = {"eegnet": ("seed", "device")}
+
+
 def config_hash(cfg: dict[str, Any]) -> str:
-    """Return a 10-hex-char SHA-1 of the config without the ``paths`` section."""
+    """Return a 10-hex-char SHA-1 of the design config.
+
+    Excluded: the ``paths`` section and the runtime keys in :data:`RUNTIME_KEYS`
+    (``eegnet.seed``, ``eegnet.device``; CONTRACTS §k9). So ``run_eegnet --device``
+    and the per-run seed leave the hash unchanged, while a design override such as
+    ``--max-epochs`` changes it.
+    """
     c = copy.deepcopy(cfg)
     c.pop("paths", None)
+    for section, keys in RUNTIME_KEYS.items():
+        if isinstance(c.get(section), dict):
+            for k in keys:
+                c[section].pop(k, None)
     blob = json.dumps(c, sort_keys=True, default=str, separators=(",", ":"))
     return hashlib.sha1(blob.encode("utf-8")).hexdigest()[:10]

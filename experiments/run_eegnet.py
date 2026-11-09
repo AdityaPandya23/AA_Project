@@ -71,7 +71,8 @@ def main(argv: list[str] | None = None) -> int:
                    help="parallel runs (they share the GPU; 1-2 is sensible on 6 GB)")
     p.add_argument("--max-epochs", type=int, default=None,
                    help="override config.eegnet.max_epochs (smoke tests; changes config_hash)")
-    p.add_argument("--device", default=None, help="cuda / cpu (default: cuda if available)")
+    p.add_argument("--device", default=None,
+                   help="cuda / cpu (default: cuda if available; not part of config_hash)")
     p.add_argument("--cache-dir", default=None)
     p.add_argument("--results-dir", default=None)
     p.add_argument("--overwrite", action="store_true")

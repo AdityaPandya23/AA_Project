@@ -81,3 +81,21 @@ def test_run_eegnet_cli(synth_dir, tmp_path):
                      "--results-dir", str(tmp_path)])
     rec = json.loads((tmp_path / "eegnet_8ch" / "sub-91_ses-01to02_seed-2.json").read_text())
     assert rec["session"] == "01to02" and len(rec["per_fold"]) == 1
+
+
+def test_run_eegnet_device_flag_keeps_config_hash(synth_dir, tmp_path):
+    # CONTRACT_ISSUES R07-11: --device must not change config_hash, --max-epochs must.
+    from experiments import run_eegnet
+    from src.config import config_hash
+    args = ["--channels", "8", "--subjects", "91", "--sessions", "01", "--seeds", "0",
+            "--cache-dir", str(synth_dir)]
+    hashes = {}
+    for name, extra in (("plain", []), ("device", ["--device", "cpu"])):
+        out = tmp_path / name
+        run_eegnet.main(args + ["--max-epochs", "2", "--results-dir", str(out)] + extra)
+        rec = json.loads((out / "eegnet_8ch" / "sub-91_ses-01_seed-0.json").read_text())
+        hashes[name] = rec["config_hash"]
+        if extra:
+            assert rec["device"] == "cpu"
+    assert hashes["plain"] == hashes["device"]
+    assert hashes["plain"] != config_hash(CFG)  # --max-epochs is a design override
