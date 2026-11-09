@@ -279,3 +279,33 @@ def test_run_ga_cross_session(synth_dir, tmp_path):
 def test_parse_subjects():
     assert C.parse_subjects(["sub-17..sub-22"]) == ["17", "18", "19", "20", "21", "22"]
     assert C.parse_subjects(["3", "sub-05", "91-92"]) == ["03", "05", "91", "92"]
+
+
+def test_run_ga_random_protocol(synth_dir, tmp_path):
+    """Drift check: stratified 5-fold ignoring blocks, seed = split seed, `_random` suffix."""
+    from experiments import run_ga
+    from src import cv
+    run_ga.main(["--method", "ga_nsga", "--subjects", "91", "--sessions", "01", "--protocol",
+                 "random", "--seeds", "3", "--n-jobs", "1", "--pop-size", "6",
+                 "--n-generations", "2", "--cache-dir", str(synth_dir), "--results-dir",
+                 str(tmp_path)])
+    rec = json.loads((tmp_path / "ga_nsga" / "sub-91_ses-01_seed-3_random.json").read_text())
+    results.validate_result(rec)
+    assert rec["protocol"] == "random" and len(rec["per_fold"]) == CFG["evaluation"]["random_n_splits"]
+    d, _ = C.load_unit("fbcsp", "91", "01", CFG, synth_dir)
+    expected = cv.random_splits(d["y"], CFG["evaluation"]["random_n_splits"], 3)
+    for f, (_, te) in zip(rec["per_fold"], expected):
+        assert f["test_trial_id"] == d["trial_id"][te].tolist()
+    assert (tmp_path / "pareto" / "ga_nsga" / "sub-91_ses-01_seed-3_random.json").exists()
+
+
+def test_run_ga_view_cache(synth_dir, tmp_path):
+    """--cache-kind view runs on the viewing cache and writes <method>_view."""
+    from experiments import run_ga
+    run_ga.main(["--method", "ga_single", "--subjects", "91", "--sessions", "01", "--seeds", "0",
+                 "--n-jobs", "1", "--pop-size", "6", "--n-generations", "2", "--cache-kind",
+                 "view", "--cache-dir", str(synth_dir), "--results-dir", str(tmp_path)])
+    rec = json.loads((tmp_path / "ga_single_view" / "sub-91_ses-01_seed-0.json").read_text())
+    results.validate_result(rec)
+    assert rec["method"] == "ga_single_view" and len(rec["per_fold"]) == 4
+    assert run_ga.cache_kind("ga_nsga_view") == "view" and run_ga.cache_kind("ga_nsga") == "fbcsp"

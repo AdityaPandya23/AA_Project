@@ -144,6 +144,20 @@ recording checked has 4 blocks × 30 trials.
 * Because sequences are shared across subjects too, any future cross-subject
   analysis has the same confound.
 
+> **P5 addendum (R07, 2026-11-09; P5_REPORT §1.2):** whole **30-trial blocks** are
+> reused far more often than whole sequences. 10 of the 20 subjects with two
+> sessions have at least one ses-02 block whose label order is identical to a
+> ses-01 block, usually shifted to another block position. sub-01 has 4 such
+> blocks; 02, 03 and 14 have 3; 16 and 17 have 2; 04, 07, 18 and 22 have 1. So the
+> within-block position → class mapping carries over to the other session for
+> half of the subjects, not only for sub-01. A position-only classifier
+> (`trial_id % 30`) reaches 0.397 BA cross-session (0.390 without sub-01). Within
+> a session, blocks are distinct except **sub-13 ses-01 (blocks 0 and 3 are
+> identical)**. The leave-one-block-out protocol stays sound (control 0.329). The
+> P3/P4 methods show no sign of exploiting the reuse (P5_REPORT §1.3). Any
+> analysis that can see within-block position inherits this confound:
+> cross-session, cross-subject, or the `random` protocol.
+
 ## 5. Trials per class / session, and missing data
 
 * Raw: every figure-task recording has **120 trials = 40 per class**, 4 blocks

@@ -36,7 +36,7 @@ def run_one(method: str, n_ch: str, subject: str, session: str, seed: int, proto
             cfg: dict[str, Any], cache_dir: Path, results_dir: Path) -> Path:
     from src.eegnet import evaluate_eegnet
 
-    d, splits = C.load_unit("eegnet", subject, session, cfg, cache_dir)
+    d, splits = C.load_unit("eegnet", subject, session, cfg, cache_dir, protocol, seed)
     ch_idx = None if n_ch == "32" else cache.candidate_channel_index(d["ch_names"], cfg)
     run_cfg = copy.deepcopy(cfg)
     run_cfg["eegnet"]["seed"] = int(seed)
@@ -62,7 +62,8 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--channels", nargs="+", choices=sorted(METHOD_NAMES), default=["32", "8"])
     p.add_argument("--subjects", nargs="+", required=True, help="e.g. sub-17..sub-22 03 05")
-    p.add_argument("--protocol", choices=["block", "cross_session"], default="block")
+    p.add_argument("--protocol", choices=["block", "cross_session", "random"], default="block",
+                   help="random = stratified 5-fold ignoring blocks, seed = split seed")
     p.add_argument("--sessions", nargs="+", default=None)
     p.add_argument("--seeds", nargs="+", type=int, default=None, help="default: config.ga.seeds")
     p.add_argument("--method-name", default=None,

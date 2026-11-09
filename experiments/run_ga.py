@@ -44,6 +44,11 @@ METHODS = {"stability": "ga_nsga", "accuracy_only": "ga_single",
            "ga_nsga": "ga_nsga", "ga_single": "ga_single"}
 
 
+def cache_kind(method: str) -> str:
+    """``*_view`` methods (sanity check on the viewing period) use the ``view`` cache."""
+    return "view" if method.endswith("_view") else "fbcsp"
+
+
 def _suffix(protocol: str) -> str:
     return "_random" if protocol == "random" else ""
 
@@ -69,13 +74,14 @@ def run_fold(method: str, subject: str, session: str, seed: int, protocol: str, 
     if out.exists():
         return json.loads(out.read_text())
 
-    d, splits = C.load_unit("fbcsp", subject, session, cfg, Path(cache_dir))
+    d, splits = C.load_unit(cache_kind(method), subject, session, cfg, Path(cache_dir),
+                            protocol, seed)
     X, y, block = d["X"], d["y"], d["block"]   # X: one object for the whole job (fbcsp cache)
     train_idx, test_idx = splits[fold]
     assert np.intersect1d(train_idx, test_idx).size == 0
 
     t0 = time.perf_counter()
-    runner = ga.run_nsga if method == "ga_nsga" else ga.run_single_objective
+    runner = ga.run_nsga if method.startswith("ga_nsga") else ga.run_single_objective
     # The GA receives train_idx only and asserts its inner splits stay inside it.
     res = runner(X, y, block, train_idx, cfg, seed)
     bits = res["chosen_bits"]
@@ -137,9 +143,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--method", choices=sorted(METHODS), required=True,
                    help="stability|ga_nsga -> ga_nsga, accuracy_only|ga_single -> ga_single")
     p.add_argument("--subjects", nargs="+", required=True, help="e.g. sub-17..sub-22 03 05")
-    p.add_argument("--protocol", choices=["block", "cross_session"], default="block")
+    p.add_argument("--protocol", choices=["block", "cross_session", "random"], default="block",
+                   help="random = stratified 5-fold ignoring blocks, seed = split seed "
+                   "(drift check only; files get the _random suffix)")
     p.add_argument("--sessions", nargs="+", default=None,
-                   help="block protocol only (default: config.dataset.sessions)")
+                   help="block/random protocols only (default: config.dataset.sessions)")
     p.add_argument("--seeds", nargs="+", type=int, default=None, help="default: config.ga.seeds")
     p.add_argument("--n-jobs", type=int, default=max(1, (os.cpu_count() or 2) // 2),
                    help="parallel fold jobs (default: half the logical CPUs; throughput "
@@ -150,6 +158,8 @@ def main(argv: list[str] | None = None) -> int:
                    help="override config.ga.pop_size (changes config_hash)")
     p.add_argument("--n-generations", type=int, default=None,
                    help="override config.ga.n_generations (changes config_hash)")
+    p.add_argument("--cache-kind", choices=["fbcsp", "view"], default="fbcsp",
+                   help="view = viewing-period cache (sanity check); writes <method>_view")
     p.add_argument("--overwrite", action="store_true", help="recompute finished runs")
     a = p.parse_args(argv)
 
@@ -160,17 +170,18 @@ def main(argv: list[str] | None = None) -> int:
         cfg["ga"]["pop_size"] = a.pop_size
     if a.n_generations:
         cfg["ga"]["n_generations"] = a.n_generations
-    method = METHODS[a.method]
+    method = METHODS[a.method] + ("_view" if a.cache_kind == "view" else "")
     cache_dir = resolve_cache_dir(a.cache_dir, cfg)
     results_dir = Path(a.results_dir) if a.results_dir else Path(cfg["paths"]["results_dir"])
     seeds = a.seeds if a.seeds is not None else list(cfg["ga"]["seeds"])
     sessions = a.sessions or list(cfg["dataset"]["sessions"])
 
-    units = C.recordings(a.protocol, C.parse_subjects(a.subjects), sessions, "fbcsp", cfg,
+    units = C.recordings(a.protocol, C.parse_subjects(a.subjects), sessions, cache_kind(method), cfg,
                          cache_dir)
     runs, jobs = {}, []
     for subject, session in units:
-        n_folds = len(C.load_unit("fbcsp", subject, session, cfg, cache_dir)[1])
+        n_folds = len(C.load_unit(cache_kind(method), subject, session, cfg, cache_dir,
+                                  a.protocol)[1])
         for seed in seeds:
             final = results.result_path(method, subject, session, seed, a.protocol, cfg,
                                         results_dir)

@@ -63,7 +63,8 @@ def load_config(path: str | os.PathLike | None = None) -> dict[str, Any]:
 
 #: Per-run settings that are not part of the design (CONTRACTS §k9): set on a copy of
 #: the config by ``experiments/run_eegnet.py`` and never in ``config.yaml``.
-RUNTIME_KEYS: dict[str, tuple[str, ...]] = {"eegnet": ("seed", "device")}
+#: ``log_history`` (P5) only records training curves and does not change any result.
+RUNTIME_KEYS: dict[str, tuple[str, ...]] = {"eegnet": ("seed", "device", "log_history")}
 
 
 def config_hash(cfg: dict[str, Any]) -> str:

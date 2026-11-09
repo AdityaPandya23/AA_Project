@@ -99,3 +99,43 @@ def test_run_eegnet_device_flag_keeps_config_hash(synth_dir, tmp_path):
             assert rec["device"] == "cpu"
     assert hashes["plain"] == hashes["device"]
     assert hashes["plain"] != config_hash(CFG)  # --max-epochs is a design override
+
+
+def test_history_logging_does_not_change_results(synth_dir):
+    # P5: log_history only observes (eval-mode passes, no RNG), restore_best=False is fixed-length.
+    from src.config import config_hash
+    d, splits = C.load_unit("eegnet", "91", "01", CFG, synth_dir)
+    plain = eegnet.evaluate_eegnet(d["X"], d["y"], splits[:2], cfg=quick_cfg(4))
+    cfg_log = quick_cfg(4)
+    cfg_log["eegnet"]["log_history"] = True
+    logged = eegnet.evaluate_eegnet(d["X"], d["y"], splits[:2], cfg=cfg_log)
+    assert all(np.array_equal(a, b) for a, b in zip(plain["y_pred"], logged["y_pred"]))
+    assert plain["best_epoch"] == logged["best_epoch"] and plain["history"] == [None, None]
+    for h, n in zip(logged["history"], logged["n_epochs"]):
+        assert len(h) == n and {"train_loss", "train_ba", "val_loss", "val_ba"} <= set(h[0])
+    assert all(0 <= v <= 1 for v in logged["train_ba"] + logged["val_ba"])
+    assert config_hash(cfg_log) == config_hash(quick_cfg(4))
+    fixed = quick_cfg(4)
+    fixed["eegnet"].update(early_stopping_patience=4, restore_best=False)
+    r = eegnet.evaluate_eegnet(d["X"], d["y"], splits[:1], cfg=fixed)
+    assert r["n_epochs"] == [4]
+    assert config_hash(fixed) != config_hash(quick_cfg(4))
+
+
+def test_eegnet_diag_reproduces_p4_and_writes_variants(synth_dir, tmp_path):
+    from experiments import eegnet_diag, run_eegnet
+    p4 = tmp_path / "p4"
+    run_eegnet.main(["--channels", "8", "--subjects", "91", "--sessions", "01", "--seeds", "0",
+                     "--max-epochs", "3", "--cache-dir", str(synth_dir), "--results-dir", str(p4)])
+    out, hist = tmp_path / "diag", tmp_path / "hist"
+    eegnet_diag.main(["--variants", "logged", "fixed100", "--channels", "8", "--subjects", "91",
+                      "--sessions", "01", "--protocols", "block", "--max-epochs-cap", "3", "--n-jobs", "2",
+                      "--cache-dir", str(synth_dir), "--out", str(out), "--history-dir", str(hist),
+                      "--p4-root", str(p4)])
+    s = json.loads((out / "summary.json").read_text())
+    assert s["reproduces_p4"]["eegnet_8ch"] == {"identical": 1, "n": 1}
+    rec = json.loads((out / "eegnet_8ch_fixed100" / "sub-91_ses-01_seed-0.json").read_text())
+    results.validate_result(rec)
+    assert rec["exploratory"] is True and all(f["n_epochs"] == 3 for f in rec["per_fold"])
+    assert (hist / "eegnet_8ch_logged" / "sub-91_ses-01_seed-0.json").exists()
+    assert (out / "curves.csv").exists() and (out / "variants.csv").exists()
