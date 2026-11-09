@@ -187,6 +187,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--p4-root", default="results", help="holds the P4 eegnet_32ch/ eegnet_8ch/")
     p.add_argument("--cache-dir", default=None)
     p.add_argument("--max-epochs-cap", type=int, default=None, help="smoke tests only")
+    p.add_argument("--n-jobs", type=int, default=1,
+                   help="parallel runs sharing the GPU (about 300 MB each)")
     p.add_argument("--no-summary", action="store_true")
     a = p.parse_args(argv)
     cfg = load_config()
@@ -194,17 +196,29 @@ def main(argv: list[str] | None = None) -> int:
     out, hdir = Path(a.out), Path(a.history_dir)
     subjects = C.parse_subjects(a.subjects)
     sessions = a.sessions or list(cfg["dataset"]["sessions"])
+    # Longest jobs first (fixed300 > fixed100 > early-stopped; 32ch > 8ch) so parallel
+    # workers finish together. Every run is seeded and independent, so n_jobs does not
+    # change any result (only the timing fields, which share the GPU).
+    cost = {"fixed300": 3, "fixed100": 2}
+    jobs = sorted(((v, ch, s, ses, prot) for v in a.variants for prot in a.protocols
+                   for s, ses in C.recordings(prot, subjects, sessions, "eegnet", cfg, cache_dir)
+                   for ch in a.channels),
+                  key=lambda j: (-cost.get(j[0], 1), j[1] != "32"))
     t0, n = time.perf_counter(), 0
-    for variant in a.variants:
-        for prot in a.protocols:
-            for subject, session in C.recordings(prot, subjects, sessions, "eegnet", cfg, cache_dir):
-                for n_ch in a.channels:
-                    path = run_one(variant, n_ch, subject, session, prot, a.seed, cfg, cache_dir,
-                                   out, hdir, a.max_epochs_cap)
-                    n += 1
-                    r = json.loads(path.read_text(encoding="utf-8"))
-                    print(f"[run ] {r['method']} {prot} sub-{subject} ses-{session}: "
-                          f"ba={r['ba_mean']:.3f} ({time.perf_counter() - t0:.0f}s)", flush=True)
+    if a.n_jobs == 1:
+        it = (run_one(v, ch, s, ses, prot, a.seed, cfg, cache_dir, out, hdir, a.max_epochs_cap)
+              for v, ch, s, ses, prot in jobs)
+    else:
+        from joblib import Parallel, delayed
+        it = Parallel(n_jobs=a.n_jobs, backend="loky", return_as="generator_unordered")(
+            delayed(run_one)(v, ch, s, ses, prot, a.seed, cfg, cache_dir, out, hdir,
+                             a.max_epochs_cap) for v, ch, s, ses, prot in jobs)
+    for path in it:
+        n += 1
+        r = json.loads(Path(path).read_text(encoding="utf-8"))
+        print(f"[run ] {n}/{len(jobs)} {r['method']} {r['protocol']} sub-{r['subject']} "
+              f"ses-{r['session']}: ba={r['ba_mean']:.3f} ({time.perf_counter() - t0:.0f}s)",
+              flush=True)
     print(f"{n} runs", flush=True)
     if not a.no_summary:
         summarise(out, hdir, Path(a.p4_root))

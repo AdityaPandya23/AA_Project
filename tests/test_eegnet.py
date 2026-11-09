@@ -129,7 +129,7 @@ def test_eegnet_diag_reproduces_p4_and_writes_variants(synth_dir, tmp_path):
                      "--max-epochs", "3", "--cache-dir", str(synth_dir), "--results-dir", str(p4)])
     out, hist = tmp_path / "diag", tmp_path / "hist"
     eegnet_diag.main(["--variants", "logged", "fixed100", "--channels", "8", "--subjects", "91",
-                      "--sessions", "01", "--protocols", "block", "--max-epochs-cap", "3",
+                      "--sessions", "01", "--protocols", "block", "--max-epochs-cap", "3", "--n-jobs", "2",
                       "--cache-dir", str(synth_dir), "--out", str(out), "--history-dir", str(hist),
                       "--p4-root", str(p4)])
     s = json.loads((out / "summary.json").read_text())

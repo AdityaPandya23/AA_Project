@@ -109,13 +109,14 @@ def _fit_one(Xtr, ytr, Xva, yva, ecfg, device, seed, history: list | None = None
             loss.backward()
             opt.step()
             if history is not None:
-                batch_losses.append(float(loss.detach()))
+                batch_losses.append(loss.detach())  # kept on the device: no per-batch sync
         model.eval()
         with torch.no_grad():
             vlogits = model(Xva_t)
             vloss = float(loss_fn(vlogits, yva_t))
             if history is not None:
-                history.append({"epoch": epoch, "train_loss": float(np.mean(batch_losses)),
+                history.append({"epoch": epoch,
+                                "train_loss": float(np.mean(torch.stack(batch_losses).cpu().tolist())),
                                 "train_ba": _ba_t(ytr_t, model(Xtr_t)),
                                 "val_loss": vloss, "val_ba": _ba_t(yva_t, vlogits)})
         if vloss < best_loss - 1e-6:
