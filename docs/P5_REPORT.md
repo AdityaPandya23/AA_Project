@@ -9,7 +9,7 @@ RTX 3050 6 GB, `AA_HOST=R07`), because R01 and R02 are offline.
 | § | Check | Status |
 |---|---|---|
 | 1 | Position-only control (cross-session, with and without sub-01) | done |
-| 2 | Random-chromosome control at matched cost | pending |
+| 2 | Random-chromosome control at matched cost | done |
 | 3 | "Within 1 SD" chooser re-examination (§k12) | pending |
 | 4 | Random-vs-block inflation (GA, EEGNet); viewing-period GA | pending |
 | 5 | Training accuracy; EEGNet early-stopping diagnostic | pending |
@@ -176,3 +176,67 @@ AA_HOST=R07 python -m experiments.position_control --subjects 01..22 --out resul
 
 Outputs: `results/p5/position_control/{position_block30,position_seq120}/*.json`,
 `per_subject.csv`, `summary.json` (every number in this section) and `summary.md`.
+
+## 2. Random-chromosome control at matched cost
+
+**Question** (P3_REPORT_R02 §3.2): does the GA's *search* find better components than
+chance, or does it only deliver the cost reduction? If a random subset of the same
+size scores as well as the GA's chosen subset, the search adds nothing.
+
+**Method** (`experiments/random_control.py`). For every outer fold of `ga_nsga` and
+`ga_single`, 50 random chromosomes are drawn with exactly the same number of
+channels, bands and windows as that fold's `chosen_bits`. That gives the same cost
+and validity; within each gene group the subset is uniform. Draws are seeded per
+fold with `default_rng([method, subject, session, seed, fold])`. Each draw is scored
+once on the outer test fold exactly like `run_ga`'s final step,
+`fbcsp.evaluate(X, y, bits, [(train_idx, test_idx)])`: a fresh FBCSP+LDA on the full
+outer training set. The GA's own chromosome is re-scored the same way and must
+reproduce the stored fold BA. It does, in all 1128 folds (504 block + 60
+cross-session per method), so the comparison runs on an identical pipeline.
+Block: 22 subjects × seeds 0–2. Cross-session: 20 subjects × seeds 0–2.
+Subject level = fold mean per file, then seeds, then sessions (`analysis.subject_level`).
+
+| Method, protocol | n | GA BA | Random BA, same cost | GA − random (Wilcoxon p: two-sided / GA > random) | Subjects GA > random | GA percentile among the 50 draws: mean (subject-level p vs 0.5) | Folds with GA ≥ 95th / ≤ 5th percentile | Random − `fbcsp_all` (p) |
+|---|---|---|---|---|---|---|---|---|
+| `ga_nsga`, block | 22 | 0.345 | 0.341 | +0.004 (0.42 / 0.21) | 13 | 0.51 (0.54) | 6.9 % / 5.0 % | −0.011 (0.14) |
+| `ga_single`, block | 22 | 0.353 | 0.347 | +0.007 (0.20 / 0.10) | 15 | 0.52 (0.14) | 6.7 % / 4.8 % | −0.006 (0.31) |
+| `ga_nsga`, cross-session | 20 | 0.340 | 0.335 | +0.005 (0.31 / 0.16) | 12 | 0.55 (0.28) | 11.7 % / 6.7 % | −0.002 (0.78) |
+| `ga_single`, cross-session | 20 | 0.328 | 0.335 | −0.007 (0.14 / 0.93) | 9 | 0.43 (0.14) | 5.0 % / 11.7 % | −0.002 (0.96) |
+
+Mean cost: `ga_nsga` 0.30, `ga_single` 0.48 (block). Under "the GA is a random draw",
+the percentile averages 0.5 and 5 % of folds fall in each 5 % tail.
+
+* **The GA's subset is indistinguishable from a random subset of the same size.**
+  The GA's percentile averages 0.51 / 0.52 (block), the tails are at their
+  nominal 5 %, and the GA − random differences (+0.004 / +0.007) are not
+  significant. The SD of the subject-level differences is 0.021 (`ga_nsga`, block),
+  so with n = 22 a search gain of about **0.011 BA** would have been detected
+  (80 % power, one-sided α = 0.05). There is no evidence of a gain that large.
+* **Cutting components costs little accuracy.** Random subsets at 30 % of the cost
+  score 0.011 below `fbcsp_all` (block, p = 0.14). At 48 % of the cost they score
+  0.006 below (p = 0.31). Cross-session, the gap is 0.002.
+* **The test fold is noisy.** Within a fold, the 50 random subsets spread with an
+  SD of 0.083 BA (block, about 30 test trials per fold). This is far larger than
+  any systematic difference between the methods. Selecting on a 3-fold inner CV of
+  about 90 trials cannot beat this noise, which matches the inner-CV optimism of
+  +0.17 / +0.21 (RESULTS.md §4.4).
+
+**Conclusion: the GA search adds nothing beyond the cost reduction.** What
+`ga_nsga` delivers, the same accuracy at about 30 % of the cost, a random subset
+of the same size delivers too. Its selections are as unstable as random ones
+(RESULTS.md §4.3, Kuncheva 0.08), and this control shows they are also no more
+accurate. With this little class information in the signal, BA is roughly flat
+across component subsets, so any subset of moderate size is about as good as any
+other. The GA's cost advantage is real but is not evidence of a meaningful
+selection. A stability-aware GA could only show a benefit on data with a stronger,
+more localised signal (e.g. the viewing period, §4).
+
+Reproduce (20 s on 8 workers, R07):
+
+```
+AA_HOST=R07 python -m experiments.random_control --n-draws 50 --n-jobs 8 --out results/p5/random_control
+```
+
+Outputs: `results/p5/random_control/{ga_nsga,ga_single}/*.json` (per fold: GA bits
+and BA, the 50 random bits and BAs, percentile), `fold_level.csv`,
+`subject_level.csv`, `summary.json` (every number in this section) and `summary.md`.
