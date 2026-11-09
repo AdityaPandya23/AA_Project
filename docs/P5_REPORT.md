@@ -11,7 +11,7 @@ RTX 3050 6 GB, `AA_HOST=R07`), because R01 and R02 are offline.
 | 1 | Position-only control (cross-session, with and without sub-01) | done |
 | 2 | Random-chromosome control at matched cost | done |
 | 3 | "Within 1 SD" chooser re-examination (§k12) | done |
-| 4 | Random-vs-block inflation (GA, EEGNet); viewing-period GA | pending |
+| 4 | Random-vs-block inflation (GA, EEGNet); viewing-period GA | done |
 | 5 | Training accuracy; EEGNet early-stopping diagnostic | pending |
 
 ## 1. Position-only control
@@ -319,3 +319,88 @@ python -m experiments.pareto_thresholds --results-dir results --out results/p5/c
 Outputs: `results/p5/chooser_rules/chooser_rules{,_cross_session}.csv` (this
 table), `pareto_thresholds_folds*.csv` (one row per fold and rule) and
 `pareto_thresholds_summary*.{csv,md}`.
+
+## 4. Random-vs-block inflation and the viewing-period GA
+
+**Exploratory.** ANALYSIS_PLAN §4.6 listed both as gaps for P3/P4, because the frozen
+runners only supported `block` and `cross_session`. R07's runner extension
+(`--protocol random`, `--cache-kind view`) was written before the plan and kept
+as uncommitted WIP. It is ported here, and the block and cross-session outputs are
+unchanged: GA (both methods) and EEGNet (32ch block, 8ch cross-session) were re-run
+on sample recordings and are bit-identical to the committed P3/P4 files. Every new
+file was then produced from committed `p5` code with `AA_HOST=R07` and config
+`08e124167b`. The GA `random` and view files (504) and the EEGNet 32ch `random`
+files (126) are **bit-identical to R07's pre-plan local runs**. EEGNet 8ch `random`
+(126 files) had not been run before. Split / GA seeds 0–2 for every method; the
+`fbcsp_all` reference is P2's runs restricted to seeds 0–2 (P2 reported −0.004 with
+seeds 0–4).
+
+### 4.1 Random 5-fold vs leave-one-block-out (subject level, n = 22)
+
+| Method | Block | Random | Random − block (median) | Wilcoxon p | Subjects random > block |
+|---|---|---|---|---|---|
+| `fbcsp_all` | 0.353 | 0.349 | −0.004 (−0.002) | 0.85 | 10 |
+| `ga_nsga` | 0.345 | 0.340 | −0.006 (−0.011) | 0.31 | 6 |
+| `ga_single` | 0.353 | 0.343 | −0.011 (−0.006) | 0.09 | 8 |
+| `eegnet_32ch` | 0.341 | 0.339 | −0.002 (−0.008) | 0.52 | 9 |
+| `eegnet_8ch` | 0.347 | 0.342 | −0.005 (−0.009) | 0.70 | 9 |
+
+**There is no random-split inflation for any method.** DATA_NOTES §4 expected
+random > block, because random folds put temporally adjacent trials (often the same
+class, in runs of 3–5) into training and test, so slow drifts become class-predictive.
+That does not happen here: every method is slightly *lower* under random splits, and
+none significantly. For EEGNet the random splits also carve its validation set from
+interleaved trials, which could have helped early stopping; they don't. So the block
+protocol does not hide a drift-driven gain, and the near-chance block results are not
+an artefact of strict splitting. There is little class information to inflate.
+
+### 4.2 Viewing period (3–7 s, the shape on screen) vs imagery (block)
+
+| Method | Imagery | Viewing | Viewing − imagery (p) | Viewing recordings p < .05 (uncorr. / Holm, of 42) | Viewing cost |
+|---|---|---|---|---|---|
+| `fbcsp_all` | 0.353 | **0.435 ± 0.069** | +0.083 (0.0003) | 25 / 12 | 1.00 |
+| `ga_single` | 0.353 | 0.428 ± 0.074 | +0.074 (0.0001) | 30 / 20 | 0.54 |
+| `ga_nsga` | 0.345 | 0.410 ± 0.048 | +0.065 (0.00002) | 30 / 15 | 0.33 |
+
+Viewing vs the full baseline (paired Wilcoxon, n = 22): `ga_nsga` **−0.025 (p = 0.004,
+better on 6/22)**; `ga_single` −0.008 (p = 0.39); `ga_nsga` vs `ga_single` −0.018
+(p = 0.04).
+
+* **Every method decodes the viewing period** well above imagery (+0.065 to +0.083),
+  with 12–20 recordings significant after Holm. This confirms the pipeline works
+  when the signal is there (P2_REPORT §2(c)).
+* **With a real signal, `ga_nsga`'s cost pressure hurts.** It is significantly worse
+  than the full baseline and than `ga_single`, at about a third of the cost. On
+  imagery the same comparison was flat (RESULTS.md §2/§3), because there was almost
+  nothing to lose.
+* **The chooser rule matters on the viewing data** (the §3 analysis repeated on the
+  view fronts, `results/p5/chooser_rules/pareto_thresholds_summary_view.md`):
+  best inner BA (`0sd`) 0.421 at cost 0.45, `1sd` 0.410 at 0.33, `knee` 0.398,
+  `2sd` 0.393, `mincost` 0.377 at 0.21. Accuracy now falls steadily with cost,
+  unlike the flat imagery result in §3. The 1-SD rule gives up about 0.01 BA
+  relative to `0sd`, and about 0.025 relative to `fbcsp_all`, for a 67 % cost
+  reduction. (Same caveat as §3: these are test-set scores.)
+* The GA selections still pass Holm on more recordings than `fbcsp_all` (15–20 vs
+  12) despite the lower mean. The smaller models seem to help the weak recordings a
+  little and cost the strong ones more.
+
+**Conclusion:** with a decodable signal, the stability-aware GA trades accuracy for
+cost in the expected way. It never matches the full baseline, and the 1-SD rule sits
+at a point that costs a significant 0.025 BA. On imagery this trade-off is invisible
+only because there is no accuracy to trade.
+
+Reproduce:
+
+```
+AA_HOST=R07 python -m experiments.run_ga --method ga_nsga   --subjects 01..22 --protocol random --results-dir results/p5/drift
+AA_HOST=R07 python -m experiments.run_ga --method ga_single --subjects 01..22 --protocol random --results-dir results/p5/drift
+AA_HOST=R07 python -m experiments.run_ga --method ga_nsga   --subjects 01..22 --cache-kind view --results-dir results/p5/drift
+AA_HOST=R07 python -m experiments.run_ga --method ga_single --subjects 01..22 --cache-kind view --results-dir results/p5/drift
+AA_HOST=R07 python -m experiments.run_eegnet --channels 32 8 --subjects 01..22 --protocol random --results-dir results/p5/drift
+python -m experiments.pareto_thresholds --results-dir results/p5/drift --out results/p5/chooser_rules --view --protocol block --no-compare
+python -m reports.p5_drift --results results --out results/p5/drift
+```
+
+Outputs: `results/p5/drift/{ga_nsga,ga_single,eegnet_32ch,eegnet_8ch}/*_random.json`,
+`results/p5/drift/{ga_nsga,ga_single}_view/*.json`, the Pareto side files in
+`results/p5/drift/pareto/`, and `summary.{json,md}`.
