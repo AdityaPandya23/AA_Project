@@ -266,6 +266,10 @@ that would matter, if the imagery signal were decodable at all.
    ported unchanged (block and cross-session outputs bit-identical).
 6. **One machine for P5/P6.** R01 and R02 were offline. All exploratory runs are on
    R07 and labelled `AA_HOST=R07`.
+7. **P5 EEGNet per-epoch histories not retained.** The full per-fold curves (git-ignored)
+   were deleted with the `p5` worktree. The committed mean curves (`curves.csv`, F10) and
+   the per-fold fields in the result files hold every reported number, and re-running
+   `experiments.eegnet_diag` regenerates the histories.
 
 ## 9. Reproducibility
 

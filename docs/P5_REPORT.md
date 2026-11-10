@@ -508,7 +508,11 @@ p = 0.052). Full table: `results/p5/eegnet_diag/variants.csv`.
   imagery period for any of these models.
 
 Reproduce (about 2 h on R07 with the GPU plus 10 CPU workers; full per-epoch
-histories go to the git-ignored `results/raw/p5_eegnet_history/`):
+histories go to the git-ignored `results/raw/p5_eegnet_history/`). *Note (P6):* R07's
+copy of those per-fold histories was lost when the `p5` worktree was removed. Every
+number and figure here uses the committed `curves.csv` (mean curves) and the per-fold
+fields of the result JSONs. Re-running the command regenerates the full histories
+deterministically.
 
 ```
 python -m reports.train_accuracy --results results --out results/p5/train_accuracy
