@@ -1,0 +1,7 @@
+Test,Comparison,Protocol,n,Mean Δ,Median Δ,p,p (Holm),r_rb
+Primary,GA-NSGA > FBCSP all (one-sided),block,22,-0.007,-0.004,0.788,–,-0.19
+S1,GA-NSGA (proposed) vs GA single-obj.,block,22,-0.008,-0.006,0.256,1.000,-0.28
+S2,GA-NSGA (proposed) vs FBCSP all,cross-session,20,+0.003,+0.008,0.616,1.000,+0.13
+S3,GA-NSGA (proposed) vs EEGNet (32 ch),block,22,+0.004,-0.001,0.975,1.000,-0.01
+S4,GA-NSGA (proposed) vs EEGNet (8 ch),block,22,-0.002,-0.001,1.000,1.000,-0.00
+S2 sensitivity,S2 without sub-01,cross-session,19,+0.006,+0.008,0.463,outside family,+0.20

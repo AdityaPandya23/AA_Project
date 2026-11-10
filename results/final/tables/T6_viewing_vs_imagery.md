@@ -1,0 +1,7 @@
+## T6. Viewing period vs imagery (P5 §4.2)
+
+| Method | Imagery BA | Viewing BA | Viewing − imagery | p | Viewing recordings > chance (Holm) | Cost |
+|---|---|---|---|---|---|---|
+| FBCSP all | 0.353 | 0.435 ± 0.069 | +0.083 | <0.001 | 12/42 | 1.00 |
+| GA-NSGA (proposed) | 0.345 | 0.410 ± 0.048 | +0.065 | <0.001 | 15/42 | 0.33 |
+| GA single-obj. | 0.353 | 0.428 ± 0.074 | +0.074 | <0.001 | 20/42 | 0.54 |

@@ -57,8 +57,8 @@ Two-sided Wilcoxon signed-rank (`analysis.paired_test`), Holm over the four
 | # | Comparison | Protocol | n | Mean Δ | Median Δ | p | p (Holm) | r_rb |
 |---|---|---|---|---|---|---|---|---|
 | S1 | `ga_nsga` vs `ga_single` | block | 22 | −0.008 | −0.006 | 0.256 | 1.000 | −0.28 |
-| S2 | `ga_nsga` vs `fbcsp_all` | cross-session | 20 | +0.003 | +0.008 | 0.616 | 1.000 | +0.14 |
-| S3 | `ga_nsga` vs `eegnet_32ch` | block | 22 | +0.004 | −0.002 | 0.975 | 1.000 | −0.01 |
+| S2 | `ga_nsga` vs `fbcsp_all` | cross-session | 20 | +0.003 | +0.008 | 0.616 | 1.000 | +0.13 |
+| S3 | `ga_nsga` vs `eegnet_32ch` | block | 22 | +0.004 | −0.001 | 0.975 | 1.000 | −0.01 |
 | S4 | `ga_nsga` vs `eegnet_8ch` | block | 22 | −0.002 | −0.001 | 1.000 | 1.000 | −0.00 |
 
 Δ = first − second method. **No secondary comparison is significant.**
@@ -177,6 +177,8 @@ exploratory step.
    (χ² = 1.20, p = 0.878, n = 22), and that table's own p-values.
 3. Nothing else: no subject excluded, no file missing, the Holm family as planned
    (m = 4), and the chooser unchanged.
+
+*Erratum (2026-11-10, P6):* two cells in the §3 table were rounded twice from 3-decimal output. S2 r_rb is +0.13 (exact 0.1345, was +0.14) and S3 median Δ is −0.001 (exact −0.00147, was −0.002). No p-value or conclusion changes; `results/final/tables/T2_preregistered_tests.md` is generated directly from the results.
 
 ## 7. Conclusion
 
