@@ -337,7 +337,7 @@ P2 results stay valid.
 | k9 | EEGNet seed and device (§h; R07-2) | Optional `cfg["eegnet"]["seed"]` and `cfg["eegnet"]["device"]`, set per run on a copy of the config by `run_eegnet.py`. Not in `config.yaml`; excluded from `config_hash`. |
 | k10 | `infer_time_ms` (§i; R07-5) | Batch prediction of the test fold ÷ `n_test`. EEGNet also writes `infer_time_ms_batch1` (online-BCI latency). |
 | k11 | `train_time_s` for the GA (§i; R07-6) | Sum of the per-fold wall times (GA search + final fit). `ga_time_s` holds the search alone. |
-| k12 | "Within 1 SD" rule (§g; open item 8, R01 #11) | **Unchanged for P3.** Re-examine after P3 using the stored Pareto fronts; any change is a new contract decision and a re-run of `ga_nsga`. |
+| k12 | "Within 1 SD" rule (§g; open item 8, R01 #11) | **Unchanged for P3.** Re-examine after P3 using the stored Pareto fronts; any change is a new contract decision and a re-run of `ga_nsga`. **Closed (P5 §3, 2026-11-10): unchanged.** No alternative rule (best inner BA, 0.5/2 SD, SE, knee, min cost) differs from the 1-SD rule or from `fbcsp_all` on imagery, so no change is made and `ga_nsga` is not re-run. |
 | k13 | Results location of the baseline | `experiments/baseline.py` writes `results/baseline_all/fbcsp_all/`, and `experiments/sanity.py` writes `results/sanity/`. GA and EEGNet runners write `results/{method}/`. `analysis.load_results` takes a list of directories. |
 
 ---
@@ -351,7 +351,7 @@ P2 results stay valid.
 5. **Filter design:** ✅ as in `config.preprocess` (FIR 1–40 Hz on continuous data; Butterworth order 4 per band on padded epochs).
 6. **CSP details:** ✅ recorded in CONTRACT_ISSUES §4.
 7. **"Stability" = `ba_std` across inner folds:** ✅ unchanged. Selection stability (Jaccard/Kuncheva) is reported in P5 but is not an objective.
-8. **"Within 1 SD":** ⏳ see k12 (after P3).
+8. **"Within 1 SD":** ✅ re-examined in P5 §3, rule unchanged (k12).
 9. **EEGNet hyperparameters and budget:** ✅ `config.eegnet` + k2; `eegnet_gach` not planned (k1).
 10. **Cross-session GA:** ✅ `StratifiedGroupKFold` over the 4 ses-01 blocks with n = 3.
 11. **Subjects with only ses-01:** ✅ sub-09 and sub-10 (20 cross-session subjects).
