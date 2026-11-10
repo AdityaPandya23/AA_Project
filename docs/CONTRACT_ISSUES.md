@@ -6,8 +6,8 @@ does now and what I propose. Items marked *decision needed* need agreement befor
 anyone edits `CONTRACTS.md`.
 
 > **Status:** every item below was settled at P1.5 and is recorded in
-> `docs/CONTRACTS.md` §k (binding from tag `p1-integrated`). The only item
-> still open is #11 / k12 (the 1-SD rule), which is revisited after P3. The
+> `docs/CONTRACTS.md` §k (binding from tag `p1-integrated`). The last open item,
+> #11 / k12 (the 1-SD rule), was re-examined in P5 §3 and closed unchanged. The
 > text below is kept as the rationale. Found later and resolved in P5
 > (`p5-fixes`, after tag `p4-results`): R07-11 and R07-12.
 
@@ -156,7 +156,7 @@ and viewing-vs-imagery summaries. The viewing runs are written as
   signatures are unchanged.
 * Results produced from the synthetic cache carry `"synthetic": true`.
 
-## 11. NSGA-II selection rule may favour too-small chromosomes (§g) — *decision needed after real runs*
+## 11. NSGA-II selection rule may favour too-small chromosomes (§g) — *closed in P5 §3: rule unchanged*
 
 §g picks the lowest-cost Pareto solution with `ba_mean >= b*.ba_mean - b*.ba_std`.
 With 3 inner folds of ~30 trials each, the inner SD can be large (not yet measured on real data),
